@@ -7,7 +7,6 @@ import com.apple.springboot.repository.RawDataStoreRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,16 +19,10 @@ import org.springframework.util.FileCopyUtils;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.*;
 
-
-/**
- * Service responsible for ingesting JSON content from different sources (S3, classpath, API),
- * parsing and cleansing the content, and storing the raw and cleansed data into PostgreSQL tables.
- */
 @Service
 public class DataIngestionService {
 
@@ -39,9 +32,10 @@ public class DataIngestionService {
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final ResourceLoader resourceLoader;
-    private final String jsonFilePath; // Default classpath file path from properties
+    private final String jsonFilePath;
     private final S3StorageService s3StorageService;
     private final String defaultS3BucketName;
+    private final ContextConfigService contextConfigService;
 
     public DataIngestionService(RawDataStoreRepository rawDataStoreRepository,
                                 CleansedDataStoreRepository cleansedDataStoreRepository,
@@ -49,7 +43,8 @@ public class DataIngestionService {
                                 ResourceLoader resourceLoader,
                                 @Value("${app.json.file.path}") String jsonFilePath,
                                 S3StorageService s3StorageService,
-                                @Value("${app.s3.bucket-name}") String defaultS3BucketName) {
+                                @Value("${app.s3.bucket-name}") String defaultS3BucketName,
+                                ContextConfigService contextConfigService) {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
@@ -57,9 +52,9 @@ public class DataIngestionService {
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
+        this.contextConfigService = contextConfigService;
     }
 
-    // Helper class for S3 URI parsing
     private static class S3ObjectDetails {
         final String bucketName;
         final String fileKey;
@@ -68,14 +63,6 @@ public class DataIngestionService {
             this.fileKey = fileKey;
         }
     }
-    
-    /**
-     * Parses an S3 URI string and extracts bucket name and key.
-     *
-     * @param s3Uri S3 URI is provided using post in format s3://bucket/key or s3:///key (for default bucket provided in configs).
-     * @return Parsed S3ObjectDetails with bucket and key.
-     * @throws IllegalArgumentException if format is invalid.
-     */
 
     private S3ObjectDetails parseS3Uri(String s3Uri) throws IllegalArgumentException {
         if (s3Uri == null || !s3Uri.startsWith("s3://")) {
@@ -99,14 +86,6 @@ public class DataIngestionService {
         }
     }
 
-    /**
-     * Ingests and cleanses a raw JSON payload received directly from API
-     *
-     * @param jsonPayload     The raw JSON content as a string.
-     * @param sourceIdentifier A unique identifier for the source of the data API or system name.
-     * @return CleansedDataStore is used to the processed and structured data.
-     * @throws JsonProcessingException if JSON parsing fails.
-     */
     @Transactional
     public CleansedDataStore ingestAndCleanseJsonPayload(String jsonPayload, String sourceIdentifier) throws JsonProcessingException {
         logger.info("Starting ingestion and cleansing for direct JSON payload with sourceIdentifier: {}", sourceIdentifier);
@@ -132,27 +111,20 @@ public class DataIngestionService {
         return processLoadedContent(jsonPayload, sourceIdentifier, savedRawDataStore);
     }
 
-    /**
-     * Ingests and cleanses a JSON file from the application.properties 'app.json.file.path'
-     * Uses both S3 and classpath-based sources.
-     *
-     * @return CleansedDataStore after processing and cleansing the file content.
-     * @throws JsonProcessingException if JSON parsing fails.
-     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile() throws JsonProcessingException {
         try {
             return ingestAndCleanseSingleFile(this.jsonFilePath);
         } catch (IOException | RuntimeException e) {
             logger.error("Error processing default jsonFilePath '{}': {}. Creating error record.", this.jsonFilePath, e.getMessage(), e);
-            String sourceUri = "";
-            if (!sourceUri.startsWith("s3://") && !sourceUri.startsWith("classpath:")) {
-                sourceUri = "classpath:" + sourceUri;
+            String sourceUri;
+            if (!this.jsonFilePath.startsWith("s3://") && !this.jsonFilePath.startsWith("classpath:")) {
+                sourceUri = "classpath:" + this.jsonFilePath;
             } else {
                 sourceUri = this.jsonFilePath;
             }
             String finalSourceUri = sourceUri;
-            RawDataStore rawData = rawDataStoreRepository.findBySourceUri(sourceUri).orElseGet(() -> {
+            RawDataStore rawData = rawDataStoreRepository.findBySourceUri(finalSourceUri).orElseGet(() -> {
                 RawDataStore newRawData = new RawDataStore();
                 newRawData.setSourceUri(finalSourceUri);
                 return newRawData;
@@ -165,14 +137,6 @@ public class DataIngestionService {
         }
     }
 
-    // Main method for processing an identifier (S3 URI or classpath)
-    /**
-     * Ingests and cleanses content from a specific source identifier (S3 URI or classpath resource).
-     *
-     * @param identifier S3 URI (s3://bucket/key) or classpath resource path.
-     * @return CleansedDataStore after cleansing extracted content.
-     * @throws IOException if file reading or S3 download fails.
-     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile(String identifier) throws IOException {
         logger.info("Starting ingestion and cleansing for identifier: {}", identifier);
@@ -181,10 +145,8 @@ public class DataIngestionService {
         RawDataStore rawDataStore = new RawDataStore();
         rawDataStore.setSourceUri(sourceUriForDb);
         rawDataStore.setReceivedAt(OffsetDateTime.now());
-        boolean isS3Source = false;
 
         if (identifier.startsWith("s3://")) {
-            isS3Source = true;
             logger.info("Identifier is an S3 URI: {}", sourceUriForDb);
             try {
                 S3ObjectDetails s3Details = parseS3Uri(sourceUriForDb);
@@ -237,31 +199,17 @@ public class DataIngestionService {
             logger.warn("Raw JSON content from {} is effectively empty after loading.", sourceUriForDb);
             rawDataStore.setRawContentText(rawJsonContent);
             rawDataStore.setStatus("EMPTY_CONTENT_LOADED");
-            if(rawDataStore.getId() == null) rawDataStoreRepository.save(rawDataStore);
-            return createAndSaveErrorCleansedDataStore(rawDataStore, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
+            RawDataStore savedForEmpty = rawDataStoreRepository.save(rawDataStore);
+            return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
         }
 
         rawDataStore.setRawContentText(rawJsonContent);
         rawDataStore.setRawContentBinary(rawJsonContent.getBytes(StandardCharsets.UTF_8));
-        if(rawDataStore.getReceivedAt() == null) rawDataStore.setReceivedAt(OffsetDateTime.now());
-        if(rawDataStore.getStatus() == null || rawDataStore.getStatus().equals("pending_cleansing")){
-            rawDataStore.setStatus("RECEIVED");
-        }
         RawDataStore savedRawDataStore = rawDataStoreRepository.save(rawDataStore);
         logger.info("Processed raw data with ID: {} for source: {} with status: {}", savedRawDataStore.getId(), sourceUriForDb, savedRawDataStore.getStatus());
 
         return processLoadedContent(rawJsonContent, sourceUriForDb, savedRawDataStore);
     }
-    
-    /**
-     * Parses and extracts content like copy, disclaimer, analytics attributes from JSON.
-     *
-     * @param rawJsonContent      Raw JSON content string.
-     * @param sourceUriForDb      The source URI recorded in the database.
-     * @param associatedRawDataStore The corresponding RawDataStore entry.
-     * @return CleansedDataStore with structured, extracted data.
-     * @throws JsonProcessingException if parsing or serialization fails.
-     */
 
     private CleansedDataStore processLoadedContent(String rawJsonContent, String sourceUriForDb, RawDataStore associatedRawDataStore) throws JsonProcessingException {
         List<Map<String, Object>> cleansedContentItems = new ArrayList<>();
@@ -284,15 +232,13 @@ public class DataIngestionService {
         cleansedDataStore.setRawDataId(associatedRawDataStore.getId());
         cleansedDataStore.setSourceUri(sourceUriForDb);
         cleansedDataStore.setCleansedAt(OffsetDateTime.now());
-
-        //cleansedDataStore.setCleansedItems(objectMapper.writeValueAsString(cleansedContentItems));
         cleansedDataStore.setCleansedItems(cleansedContentItems);
 
         if (cleansingErrorsJson != null) {
-            cleansedDataStore.setCleansingErrors(objectMapper.valueToTree(cleansingErrorsJson));
+            cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
         }
 
-        if ("EXTRACTION_ERROR".equals(associatedRawDataStore.getStatus()) || "CLEANSING_SERIALIZATION_ERROR".equals(associatedRawDataStore.getStatus())) {
+        if ("EXTRACTION_ERROR".equals(associatedRawDataStore.getStatus())) {
             cleansedDataStore.setStatus("CLEANSING_FAILED");
         } else if (cleansedContentItems.isEmpty()) {
             logger.info("No content items extracted for raw_data_id: {}. Status set to 'NO_CONTENT_EXTRACTED'.", associatedRawDataStore.getId());
@@ -307,17 +253,6 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(cleansedDataStore);
     }
 
-    // Helper to create and save error state for CleansedDataStore
-    /**
-     * Creates and saves an error record in the CleansedDataStore table when ingestion fails for any reason
-     *
-     * @param rawDataStore        Associated raw data record.
-     * @param cleansedStatus      Status to be stored (e.gFILE_ERROR, S3_DOWNLOAD_FAILED).
-     * @param errorKeyOrMessagePrefix Key or message prefix indicating error type.
-     * @param specificErrorMessage     Detailed error message.
-     * @return CleansedDataStore with error metadata.
-     * @throws JsonProcessingException if serialization fails.
-     */
     private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorKeyOrMessagePrefix, String specificErrorMessage) throws JsonProcessingException {
         CleansedDataStore errorCleansedData = new CleansedDataStore();
         if (rawDataStore != null && rawDataStore.getId() != null) {
@@ -332,148 +267,121 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(errorCleansedData);
     }
 
-    /**
-     * Generates a basic error map with key and human-readable error message.
-     *
-     * @param errorKey     Identifier for the error.
-     * @param errorMessage Detailed description of the error.
-     * @return Map representation suitable for serialization.
-     */
     private Map<String,Object> generateErrorJson(String errorKey, String errorMessage) {
         Map<String, Object> errorMap = new HashMap<>();
         errorMap.put("errorType", errorKey);
         errorMap.put("errorMessage", errorMessage != null ? errorMessage : "Unknown error");
         return errorMap;
     }
-    
-    /**
-     * Recursively traverses a JSON and starts extracting 'copy', 'disclaimer', and 'analyticsAttributes'
-     * into a list of content entries, each tagged with source path and model hint.
-     *
-     * @param node               Current JSON node.
-     * @param currentPath        JSONPath-style representation of the node location.
-     * @param inheritedModelHint Model hint from parent context.
-     * @param inheritedPathValue Path value from parent node.
-     * @param results            Collected list of cleansed items.
-     */
 
-    private static void findAndExtractRecursive(JsonNode node,
-                                                String currentPath,
-                                                String inheritedModelHint,
-                                                String inheritedPathValue,
-                                                List<Map<String, Object>> results) {
-        if (node.isObject()) {
-            String localModel = node.path("_model").asText(null);
-            String localInheritedPath = node.path("_path").asText(null);
-            String copyText = node.path("copy").asText(null);
+    private void findAndExtractRecursive(JsonNode currentNode,
+                                         String currentJsonPath,
+                                         String inheritedModel,
+                                         String inheritedSourcePath,
+                                         List<Map<String, Object>> results) {
+        if (currentNode.isObject()) {
+            String currentModel = currentNode.path("_model").asText(inheritedModel);
+            String currentSourcePath = currentNode.path("_path").asText(inheritedSourcePath);
 
-            String model = (localModel != null && !localModel.isBlank()) ? localModel : inheritedModelHint;
-            String semanticPath = (localInheritedPath != null && !localInheritedPath.isBlank()) ? localInheritedPath : inheritedPathValue;
-
-            // Handle 'copy' field
-            if (copyText != null && !copyText.isBlank()) {
-                String cleansed = cleanseCopyText(copyText);
-                if (!cleansed.isBlank()) {
-                    Map<String, Object> item = new HashMap<>();
-                    item.put("sourcePath", semanticPath != null ? semanticPath : currentPath + ".copy");
-                    item.put("originalFieldName", "copy");
-                    item.put("cleansedContent", cleansed);
-                    if (model != null) item.put("model", model);
-                    results.add(item);
-
-                    logger.debug("Extracted copy: {}", item);
+            // *** MODIFIED: Use 'context' as key, variable name is 'determinedContext' for clarity ***
+            Map<String, Object> determinedContext = this.contextConfigService.getContext(currentModel, currentSourcePath != null ? currentSourcePath : currentJsonPath);
+            // Direct "copy" field — textual content
+            JsonNode copyNode = currentNode.get("copy");
+            if (copyNode != null && copyNode.isTextual()) {
+                String copyText = copyNode.asText();
+                if (!copyText.isBlank()) {
+                    String cleansed = cleanseCopyText(copyText);
+                    if (!cleansed.isBlank()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
+                        item.put("originalFieldName", "copy");
+                        item.put("cleansedContent", cleansed);
+                        if (currentModel != null) item.put("model", currentModel);
+                        // *** MODIFIED: Use 'context' as key ***
+                        item.put("context", new HashMap<>(determinedContext));
+                        results.add(item);
+                        logger.debug("Extracted copy: {} with context: {}", item, determinedContext);
+                    }
                 }
             }
-            // Handle 'disclaimer' field
-            JsonNode disclaimerNode = node.get("disclaimer");
+            // Direct "disclaimer" field — textual content
+            JsonNode disclaimerNode = currentNode.get("disclaimer");
             if (disclaimerNode != null && disclaimerNode.isTextual()) {
                 String disclaimerText = disclaimerNode.asText();
                 String cleansed = cleanseCopyText(disclaimerText);
-
                 if (!cleansed.isBlank()) {
                     Map<String, Object> item = new HashMap<>();
-                    String itemSourcePath = (semanticPath != null && !semanticPath.isBlank())
-                            ? semanticPath
-                            : currentPath + ".disclaimer";
-
-                    item.put("sourcePath", itemSourcePath);
+                    item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".disclaimer");
                     item.put("originalFieldName", "disclaimer");
                     item.put("cleansedContent", cleansed);
-                    if (model != null && !model.isBlank()) {
-                        item.put("model", model);
-                    }
+                    if (currentModel != null) item.put("model", currentModel);
+                    // *** MODIFIED: Use 'context' as key ***
+                    item.put("context", new HashMap<>(determinedContext));
                     results.add(item);
-
-                    logger.debug("Extracted by 'disclaimer' rule: path='{}', modelHint='{}'", itemSourcePath, item.get("model"));
+                    logger.debug("Extracted disclaimer: {} with context: {}", item, determinedContext);
                 }
             }
-            // Handle analyticsAttributes
-            if (node.has("analyticsAttributes") && node.get("analyticsAttributes").isArray()) {
-                processAnalyticsAttributes(node.get("analyticsAttributes"), model, results);
+            //"analyticsAttributes" array
+            JsonNode analyticsArrayNode = currentNode.get("analyticsAttributes");
+            if (analyticsArrayNode != null && analyticsArrayNode.isArray()) {
+                // Pass the parent's determined context as a potential fallback/reference if needed
+                processAnalyticsAttributes(analyticsArrayNode, currentModel, currentSourcePath != null ? currentSourcePath : currentJsonPath, results);
             }
 
-            // Recurse on other fields
-            node.fields().forEachRemaining(entry -> {
+            // Recurse into all other fields — including "copy" when it's an object/array, and "_meta" etc.
+            currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
-                JsonNode value = entry.getValue();
-
-                if (!Set.of("_model", "_path", "copy", "analyticsAttributes").contains(fieldKey)) {
-                    String newPath = currentPath.equals("$") ? "$." + fieldKey : currentPath + "." + fieldKey;
-                    findAndExtractRecursive(value, newPath, model, semanticPath, results);
+                JsonNode fieldValue = entry.getValue();
+                //commented for the nested copy
+                // if (!Set.of("_model", "_path", "copy", "analyticsAttributes", "disclaimer").contains(fieldKey)) {
+                // Only skip _model and _path — recurse into all others, including "copy", "disclaimer", etc.
+                if (!Set.of("_model", "_path").contains(fieldKey)) {
+                    String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+                    findAndExtractRecursive(fieldValue, newJsonPath, currentModel, currentSourcePath, results);
                 }
             });
-        } else if (node.isArray()) {
-            for (int i = 0; i < node.size(); i++) {
-                String newPath = currentPath + "[" + i + "]";
-                findAndExtractRecursive(node.get(i), newPath, inheritedModelHint, inheritedPathValue, results);
+        } else if (currentNode.isArray()) {
+            for (int i = 0; i < currentNode.size(); i++) {
+                String newJsonPath = currentJsonPath + "[" + i + "]";
+                findAndExtractRecursive(currentNode.get(i), newJsonPath, inheritedModel, inheritedSourcePath, results);
             }
         }
     }
-    
-    /**
-     * Processes 'analyticsAttributes' array field by extracting individual attributes
-     * with associated name, value, path, and model. Since the analytics stored as name value pair
-     *
-     * @param analyticsArray   JSON array node containing analytics attributes.
-     * @param currentModelHint Parent model hint inherited from higher-level context.
-     * @param results          Target list to collect cleansed attribute items.
-     */
 
-    private static void processAnalyticsAttributes(JsonNode analyticsArray,
-                                                   String currentModelHint,
-                                                   List<Map<String, Object>> results) {
+    private void processAnalyticsAttributes(JsonNode analyticsArray,
+                                            String parentModelHint,
+                                            String parentPathHint,
+                                            List<Map<String, Object>> results) {
         for (JsonNode element : analyticsArray) {
-            String path = element.path("_path").asText(null);
-            String model = element.path("_model").asText(null);
-            String name = element.path("name").asText(null);
-            String value = element.path("value").asText(null);
+            if (element.isObject()) {
+                String analyticsPath = element.path("_path").asText(parentPathHint);
+                String analyticsModel = element.path("_model").asText(parentModelHint);
+                String name = element.path("name").asText(null);
+                String value = element.path("value").asText(null);
 
-            if (path != null && name != null && value != null && !value.isBlank()) {
-                String cleansed = value.trim();
-                if (!cleansed.isBlank()) {
-                    Map<String, Object> item = new HashMap<>();
-                    item.put("sourcePath", path);
-                    item.put("originalFieldName", name);
-                    item.put("cleansedContent", cleansed);
-                    if (model != null && !model.isBlank()) {
-                        item.put("model", model);
-                    } else if (currentModelHint != null) {
-                        item.put("model", currentModelHint);
+                // *** MODIFIED: Use 'context' as key, variable name is 'itemContext' for clarity ***
+                Map<String, Object> itemContext = this.contextConfigService.getContext(analyticsModel, analyticsPath);
+
+                if (analyticsPath != null && name != null && value != null && !value.isBlank()) {
+                    String cleansedValue = value.trim();
+                    if (!cleansedValue.isBlank()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("sourcePath", analyticsPath);
+                        item.put("originalFieldName", name);
+                        item.put("cleansedContent", cleansedValue);
+
+                        if (analyticsModel != null) {
+                            item.put("model", analyticsModel);
+                        }
+                        // *** MODIFIED: Use 'context' as key ***
+                        item.put("context", new HashMap<>(itemContext));
+                        results.add(item);
+                       logger.debug("Extracted analytics attribute: {} with context: {}", item, itemContext);
                     }
-                    results.add(item);
-
-                    logger.debug("Extracted analytics attribute: {}", item);
                 }
             }
         }
     }
-    
-    /**
-     * Cleanses a given string of HTML tags, custom templating markers, and additional whitespaces.
-     *
-     * @param text Raw text to be cleaned.
-     * @return A whitespace, tag-free string.
-     */
 
     private static String cleanseCopyText(String text) {
         if (text == null) {

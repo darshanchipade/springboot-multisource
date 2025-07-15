@@ -10,4 +10,5 @@ import java.util.UUID;
 @Repository
 public interface RawDataStoreRepository extends JpaRepository<RawDataStore, UUID> {
     Optional<RawDataStore> findBySourceUri(String sourceUri);
+    Optional<RawDataStore> findByContentHash(String contentHash);
 }

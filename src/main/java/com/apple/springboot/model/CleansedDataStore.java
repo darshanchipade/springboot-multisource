@@ -2,6 +2,7 @@ package com.apple.springboot.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.*;
 import software.amazon.awssdk.services.s3.endpoints.internal.Value;
 
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import com.vladmihalcea.hibernate.type.json.JsonBinaryType;
 
+@Setter
 @Getter
 @Entity
 @Table(name = "cleansed_data_store")
@@ -46,9 +48,14 @@ public class CleansedDataStore {
     private List<Map<String, Object>> cleansedItems;
 
     @Type(type = "jsonb")
+    @Column(name = "context", columnDefinition = "jsonb")
+    private Map<String, Object> context;
+
+    @Type(type = "jsonb")
     //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "cleansing_errors", columnDefinition = "jsonb")
     private Map<String, Object> cleansingErrors;
+
 
     @CreationTimestamp
     @Column(name = "cleansed_at", nullable = false, updatable = false)
@@ -59,17 +66,4 @@ public class CleansedDataStore {
 
     public CleansedDataStore() {}
 
-    public void setId(UUID id) { this.id = id; }
-
-    public void setRawDataId(UUID rawDataId) { this.rawDataId = rawDataId; }
-
-    public void setSourceUri(String sourceUri) { this.sourceUri = sourceUri; }
-
-    public void setCleansedItems(List<Map<String,Object>>cleansedItems) { this.cleansedItems = cleansedItems; }
-
-    public void setCleansingErrors(Map<String,Object> cleansingErrors) { this.cleansingErrors = cleansingErrors; }
-
-    public void setCleansedAt(OffsetDateTime cleansedAt) { this.cleansedAt = cleansedAt; }
-
-    public void setStatus(String status) { this.status = status; }
 }

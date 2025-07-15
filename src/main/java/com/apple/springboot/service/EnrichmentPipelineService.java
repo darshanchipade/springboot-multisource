@@ -5,10 +5,10 @@ import com.apple.springboot.model.EnrichedContentElement;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
+// import com.fasterxml.jackson.core.type.TypeReference; // Not strictly needed for this version
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+// import com.fasterxml.jackson.databind.JsonNode; // Not strictly needed for this version
+// import com.fasterxml.jackson.databind.node.ObjectNode; // Not strictly needed for this version
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
+// import java.io.IOException; // Not strictly needed for this version
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,23 +44,21 @@ public class EnrichmentPipelineService {
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final RateLimiter bedrockRateLimiter;
-
     private final ConsolidatedSectionService consolidatedSectionService;
 
-    // Inner DTO for deserializing items from CleansedDataStore.cleansedItems
-    // This should match the structure produced by DataIngestionService (List<Map<String, String>>)
     private static class CleansedItemDetail {
-        public String sourcePath;       // from map key "sourcePath"
-        public String originalFieldName;// from map key "originalFieldName"
-        public String cleansedContent;  // from map key "cleansedContent"
-        public String model;            // from map key "model" (modelHint)
+        public String sourcePath;
+        public String originalFieldName;
+        public String cleansedContent;
+        public String model;
+        public Map<String, Object> context; // MODIFIED for context
     }
 
     public EnrichmentPipelineService(BedrockEnrichmentService bedrockEnrichmentService,
                                      EnrichedContentElementRepository enrichedContentElementRepository,
                                      CleansedDataStoreRepository cleansedDataStoreRepository,
                                      ObjectMapper objectMapper,
-                                     RateLimiterRegistry rateLimiterRegistry,ConsolidatedSectionService consolidatedSectionService) {
+                                     RateLimiterRegistry rateLimiterRegistry, ConsolidatedSectionService consolidatedSectionService) {
         this.bedrockEnrichmentService = bedrockEnrichmentService;
         this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
@@ -95,8 +93,8 @@ public class EnrichmentPipelineService {
         }
 
         cleansedDataEntry.setStatus("ENRICHMENT_IN_PROGRESS");
-        cleansedDataStoreRepository.save(cleansedDataEntry); // Saving status change
-       // consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry);
+        cleansedDataStoreRepository.save(cleansedDataEntry);
+        consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry); // Ensured this is uncommented
 
         List<CleansedItemDetail> itemsToEnrich;
         List<Map<String, Object>> maps = cleansedDataEntry.getCleansedItems();
@@ -115,7 +113,6 @@ public class EnrichmentPipelineService {
         }
 
         logger.info("Found {} items to enrich for CleansedDataStore ID: {}", itemsToEnrich.size(), cleansedDataStoreId);
-        //For thread safe using Atomic instead of ++ counter
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failureCount = new AtomicInteger(0);
         AtomicInteger skippedByRateLimitCount = new AtomicInteger(0);
@@ -142,7 +139,6 @@ public class EnrichmentPipelineService {
                 itemProcessingErrors.add(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
             }
         }
-       // consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry);
         updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
     }
 
@@ -163,6 +159,16 @@ public class EnrichmentPipelineService {
             detail.cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
             detail.model = map.get("model") != null ? map.get("model").toString() : null;
 
+            // *** MODIFIED: Read "context" key ***
+            if (map.containsKey("context") && map.get("context") instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> contextMap = (Map<String, Object>) map.get("context");
+                detail.context = contextMap;
+            } else {
+                detail.context = Collections.emptyMap();
+                logger.warn("Context missing or not a Map for item: {}. Using empty context.", detail.sourcePath);
+            }
+
             if (detail.sourcePath != null && detail.originalFieldName != null && detail.cleansedContent != null) {
                 details.add(detail);
             } else {
@@ -171,8 +177,8 @@ public class EnrichmentPipelineService {
         }
         return details;
     }
-    
-    
+
+
     /**
  * Persists one enriched content element into enriched_content_elements table.
  * Extracts structured fields like keywords, tags, and stores enrichment metadata.
@@ -192,6 +198,8 @@ public class EnrichmentPipelineService {
         enrichedElement.setItemModelHint(itemDetail.model);
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
+        // *** MODIFIED: Use setContext and ensure itemDetail.context is handled if null ***
+        enrichedElement.setContext(itemDetail.context != null ? new HashMap<>(itemDetail.context) : Collections.emptyMap());
 
         enrichedElement.setSummary((String) enrichmentResults.getOrDefault("summary", "Error: Missing summary"));
 
@@ -252,8 +260,8 @@ public class EnrichmentPipelineService {
         enrichedElement.setStatus(elementStatus);
         enrichedContentElementRepository.save(enrichedElement);
     }
-    
-    
+
+
     /**
  * Finalizes the enrichment process by determining the final status of the CleansedDataStore record,
  * generating a summary of enrichment and storing it in the cleansingErrors field.
@@ -309,7 +317,7 @@ public class EnrichmentPipelineService {
         cleansedDataStoreRepository.save(cleansedDataEntry);
         logger.info("Finished enrichment for CleansedDataStore ID: {}. Final status: {}. Summary: {}", cleansedDataEntry.getId(), finalStatus, processingSummary);
     }
-    
+
     /**
  * Adds an enrichment-related error or summary to the cleansingErrors field of the CleansedDataStore record.
  *

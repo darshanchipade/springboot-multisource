@@ -46,6 +46,9 @@ public class RawDataStore {
     @Column(name = "status", nullable = false, columnDefinition = "TEXT")
     private String status;
 
+    @Column(name = "content_hash", columnDefinition = "TEXT")
+    private String contentHash;
+
     public RawDataStore() {}
 
     public void setId(UUID id) { this.id = id; }
@@ -61,4 +64,9 @@ public class RawDataStore {
     public void setReceivedAt(OffsetDateTime receivedAt) { this.receivedAt = receivedAt; }
 
     public void setStatus(String status) { this.status = status; }
+
+    public String getContentHash() { return contentHash; }
+
+    public void setContentHash(String contentHash) { this.contentHash = contentHash; }
+
 }

@@ -50,48 +50,7 @@ public class DataExtractionController {
     }
 
     @GetMapping("/extract-cleanse-enrich-and-store")
-//    public ResponseEntity<String> extractCleanseEnrichAndStore(
-//            @RequestParam(name = "sourceUri", required = false) String sourceUriParam) {
-//
-//        String identifierForServiceCall;
-//        String identifierForLog;
-//
-//        if (sourceUriParam != null && !sourceUriParam.trim().isEmpty()) {
-//            identifierForServiceCall = sourceUriParam.trim();
-//            identifierForLog = identifierForServiceCall;
-//        } else {
-//            identifierForServiceCall = null; // DataIngestionService.ingestAndCleanseSingleFile() will use default
-//            identifierForLog = "default configured path";
-//        }
-//
-//        logger.info("Received GET request to process from source: {}", identifierForLog);
-//        CleansedDataStore cleansedDataEntry = null;
-//
-//        try {
-//            if (identifierForServiceCall != null) {
-//                cleansedDataEntry = dataIngestionService.ingestAndCleanseSingleFile(identifierForServiceCall);
-//            } else {
-//                cleansedDataEntry = dataIngestionService.ingestAndCleanseSingleFile();
-//            }
-//            // The ingestAndCleanseSingleFile method now returns CleansedDataStore directly or throws an exception.
-//            return handleIngestionAndTriggerEnrichment(cleansedDataEntry, identifierForLog);
-//
-//        } catch (IOException | UncheckedIOException e) {
-//            logger.error("File I/O error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-//            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-//                    .body("File I/O error for " + identifierForLog + ": " + e.getMessage());
-//        } catch (IllegalArgumentException e) {
-//            logger.error("Invalid argument for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-//            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-//                    .body("Invalid input for " + identifierForLog + ": " + e.getMessage());
-//        } catch (Exception e) {
-//            logger.error("Unexpected error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-//                    .body("Unexpected error for " + identifierForLog + ": " + e.getMessage());
-//        }
-//    }
-
-        public void extractCleanseEnrichAndStore(
+    public ResponseEntity<String> extractCleanseEnrichAndStore(
             @RequestParam(name = "sourceUri", required = false) String sourceUriParam) {
 
         String identifierForServiceCall;
@@ -115,19 +74,60 @@ public class DataExtractionController {
                 cleansedDataEntry = dataIngestionService.ingestAndCleanseSingleFile();
             }
             // The ingestAndCleanseSingleFile method now returns CleansedDataStore directly or throws an exception.
-            return ;
+            return handleIngestionAndTriggerEnrichment(cleansedDataEntry, identifierForLog);
 
-        } catch (UncheckedIOException e) {
+        } catch (IOException | UncheckedIOException e) {
             logger.error("File I/O error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-            return ;
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("File I/O error for " + identifierForLog + ": " + e.getMessage());
         } catch (IllegalArgumentException e) {
             logger.error("Invalid argument for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-            return ;
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("Invalid input for " + identifierForLog + ": " + e.getMessage());
         } catch (Exception e) {
             logger.error("Unexpected error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
-            return ;
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Unexpected error for " + identifierForLog + ": " + e.getMessage());
         }
     }
+
+//        public void extractCleanseEnrichAndStore(
+//            @RequestParam(name = "sourceUri", required = false) String sourceUriParam) {
+//
+//        String identifierForServiceCall;
+//        String identifierForLog;
+//
+//        if (sourceUriParam != null && !sourceUriParam.trim().isEmpty()) {
+//            identifierForServiceCall = sourceUriParam.trim();
+//            identifierForLog = identifierForServiceCall;
+//        } else {
+//            identifierForServiceCall = null; // DataIngestionService.ingestAndCleanseSingleFile() will use default
+//            identifierForLog = "default configured path";
+//        }
+//
+//        logger.info("Received GET request to process from source: {}", identifierForLog);
+//        CleansedDataStore cleansedDataEntry = null;
+//
+//        try {
+//            if (identifierForServiceCall != null) {
+//                cleansedDataEntry = dataIngestionService.ingestAndCleanseSingleFile(identifierForServiceCall);
+//            } else {
+//                cleansedDataEntry = dataIngestionService.ingestAndCleanseSingleFile();
+//            }
+//            // The ingestAndCleanseSingleFile method now returns CleansedDataStore directly or throws an exception.
+//            return ;
+//
+//        } catch (UncheckedIOException e) {
+//            logger.error("File I/O error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
+//            return ;
+//        } catch (IllegalArgumentException e) {
+//            logger.error("Invalid argument for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
+//            return ;
+//        } catch (Exception e) {
+//            logger.error("Unexpected error for identifier: {}. Error: {}", identifierForLog, e.getMessage(), e);
+//            return ;
+//        }
+//    }
 
     @PostMapping("/ingest-json-payload")
     public ResponseEntity<String> ingestJsonPayload(@RequestBody String jsonPayload) {

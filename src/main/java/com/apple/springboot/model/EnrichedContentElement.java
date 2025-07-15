@@ -5,6 +5,7 @@ import javax.persistence.*;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -40,6 +41,10 @@ public class EnrichedContentElement {
 
     @Column(name = "cleansed_text", columnDefinition = "TEXT")
     private String cleansedText;
+
+    @Type(type = "jsonb")
+    @Column(name = "context", columnDefinition = "jsonb")
+    private Map<String, Object> context;
 
     @Column(name = "summary", columnDefinition = "TEXT")
     private String summary;
