@@ -64,6 +64,9 @@ public class CleansedDataStore {
     @Column(name = "status", nullable = false, columnDefinition = "TEXT")
     private String status;
 
+    @Column(name = "version")
+    private Integer version;
+
     public CleansedDataStore() {}
 
 }

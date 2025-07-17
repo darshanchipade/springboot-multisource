@@ -49,6 +49,12 @@ public class RawDataStore {
     @Column(name = "content_hash", columnDefinition = "TEXT")
     private String contentHash;
 
+    @Column(name = "version")
+    private Integer version = 1;
+
+    @Column(name = "latest")
+    private Boolean latest = true;
+
     public RawDataStore() {}
 
     public void setId(UUID id) { this.id = id; }
@@ -69,4 +75,19 @@ public class RawDataStore {
 
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
 
+    public Integer getVersion() {
+        return version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version;
+    }
+
+    public Boolean isLatest() {
+        return latest;
+    }
+
+    public void setLatest(Boolean latest) {
+        this.latest = latest;
+    }
 }

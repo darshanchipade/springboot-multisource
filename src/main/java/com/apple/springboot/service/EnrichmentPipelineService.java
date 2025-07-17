@@ -68,13 +68,13 @@ public class EnrichmentPipelineService {
     }
 
     /**
- * Entry point to trigger the enrichment process for a given CleansedDataStore record.
- * Applies text enrichment using AWS Bedrock for now, stores results in the database,
- * and invokes section-level consolidation which is for the conslidated data which will be further used for the search interface.
- *
- * @param cleansedDataEntry the CleansedDataStore entity to enrich
- * @throws JsonProcessingException if JSON processing fails
- */
+     * Entry point to trigger the enrichment process for a given CleansedDataStore record.
+     * Applies text enrichment using AWS Bedrock for now, stores results in the database,
+     * and invokes section-level consolidation which is for the conslidated data which will be further used for the search interface.
+     *
+     * @param cleansedDataEntry the CleansedDataStore entity to enrich
+     * @throws JsonProcessingException if JSON processing fails
+     */
     @Transactional
     public void enrichAndStore(CleansedDataStore cleansedDataEntry) throws JsonProcessingException {
         if (cleansedDataEntry == null || cleansedDataEntry.getId() == null) {
@@ -144,11 +144,11 @@ public class EnrichmentPipelineService {
 
     // Converts from the Map structure produced by DataIngestionService to CleansedItemDetail DTO
     /**
- * Converts a list of raw map entries from cleansed_items into structured CleansedItemDetail DTOs.
- *
- * @param maps list of raw maps from CleansedDataStore.cleansedItems
- * @return list of structured CleansedItemDetail objects
- */
+     * Converts a list of raw map entries from cleansed_items into structured CleansedItemDetail DTOs.
+     *
+     * @param maps list of raw maps from CleansedDataStore.cleansedItems
+     * @return list of structured CleansedItemDetail objects
+     */
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {
         if (maps == null) return Collections.emptyList();
         List<CleansedItemDetail> details = new ArrayList<>();
@@ -180,18 +180,19 @@ public class EnrichmentPipelineService {
 
 
     /**
- * Persists one enriched content element into enriched_content_elements table.
- * Extracts structured fields like keywords, tags, and stores enrichment metadata.
- *
- * @param itemDetail cleansed content item being enriched
- * @param parentEntry parent CleansedDataStore record
- * @param enrichmentResults enrichment results returned from Bedrock
- * @param elementStatus status to assign to this enriched element (e.g "ENRICHED")
- */
+     * Persists one enriched content element into enriched_content_elements table.
+     * Extracts structured fields like keywords, tags, and stores enrichment metadata.
+     *
+     * @param itemDetail cleansed content item being enriched
+     * @param parentEntry parent CleansedDataStore record
+     * @param enrichmentResults enrichment results returned from Bedrock
+     * @param elementStatus status to assign to this enriched element (e.g "ENRICHED")
+     */
     private void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
                                      Map<String, Object> enrichmentResults, String elementStatus) {
         EnrichedContentElement enrichedElement = new EnrichedContentElement();
         enrichedElement.setCleansedDataId(parentEntry.getId());
+        enrichedElement.setVersion(parentEntry.getVersion());
         enrichedElement.setSourceUri(parentEntry.getSourceUri());
         enrichedElement.setItemSourcePath(itemDetail.sourcePath);
         enrichedElement.setItemOriginalFieldName(itemDetail.originalFieldName);
@@ -263,17 +264,17 @@ public class EnrichmentPipelineService {
 
 
     /**
- * Finalizes the enrichment process by determining the final status of the CleansedDataStore record,
- * generating a summary of enrichment and storing it in the cleansingErrors field.
- *
- * @param cleansedDataEntry the CleansedDataStore record to update
- * @param successCount number of items successfully enriched
- * @param failureCount number of items failed during enrichment
- * @param skippedByRateLimitCount number of items skipped due to rate limiting
- * @param totalDeserializedItems total number of items attempted
- * @param itemProcessingErrors list of error messages during enrichment which will help us determine the excat issue
- * @throws JsonProcessingException if serializing error summary fails
- */
+     * Finalizes the enrichment process by determining the final status of the CleansedDataStore record,
+     * generating a summary of enrichment and storing it in the cleansingErrors field.
+     *
+     * @param cleansedDataEntry the CleansedDataStore record to update
+     * @param successCount number of items successfully enriched
+     * @param failureCount number of items failed during enrichment
+     * @param skippedByRateLimitCount number of items skipped due to rate limiting
+     * @param totalDeserializedItems total number of items attempted
+     * @param itemProcessingErrors list of error messages during enrichment which will help us determine the excat issue
+     * @throws JsonProcessingException if serializing error summary fails
+     */
 
     private void updateFinalCleansedDataStatus(CleansedDataStore cleansedDataEntry, int successCount, int failureCount, int skippedByRateLimitCount, int totalDeserializedItems, List<String> itemProcessingErrors) throws JsonProcessingException {
         String finalStatus;
@@ -319,13 +320,13 @@ public class EnrichmentPipelineService {
     }
 
     /**
- * Adds an enrichment-related error or summary to the cleansingErrors field of the CleansedDataStore record.
- *
- * @param cleansedDataEntry the CleansedDataStore to update
- * @param errorKey a descriptive label for the error (e.g., "EnrichmentRunSummary")
- * @param errorValue the error content, can be a string or map
- * @throws JsonProcessingException if serialization of errorValue fails
- */
+     * Adds an enrichment-related error or summary to the cleansingErrors field of the CleansedDataStore record.
+     *
+     * @param cleansedDataEntry the CleansedDataStore to update
+     * @param errorKey a descriptive label for the error (e.g., "EnrichmentRunSummary")
+     * @param errorValue the error content, can be a string or map
+     * @throws JsonProcessingException if serialization of errorValue fails
+     */
 
     private void updateEnrichmentErrorDetails(CleansedDataStore cleansedDataEntry, String errorKey, Object errorValue) throws JsonProcessingException {
         Map<String, Object> errorsMap;

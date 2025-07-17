@@ -20,6 +20,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.*;
 
@@ -37,6 +39,9 @@ public class DataIngestionService {
     private final String defaultS3BucketName;
     private final ContextConfigService contextConfigService;
 
+    /**
+     * Constructs the service with required repositories and config values.
+     */
     public DataIngestionService(RawDataStoreRepository rawDataStoreRepository,
                                 CleansedDataStoreRepository cleansedDataStoreRepository,
                                 ObjectMapper objectMapper,
@@ -55,6 +60,7 @@ public class DataIngestionService {
         this.contextConfigService = contextConfigService;
     }
 
+
     private static class S3ObjectDetails {
         final String bucketName;
         final String fileKey;
@@ -64,6 +70,10 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Helper method to parse S3 URI and return bucket + key.
+     * Supports s3://bucket/key and s3:///key (uses default bucket).
+     */
     private S3ObjectDetails parseS3Uri(String s3Uri) throws IllegalArgumentException {
         if (s3Uri == null || !s3Uri.startsWith("s3://")) {
             throw new IllegalArgumentException("Invalid S3 URI format: Must start with s3://. Received: " + s3Uri);
@@ -86,15 +96,19 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Ingests a JSON string from REST api, stores it as raw data if not duplicate,
+     * and processes it to produce cleansed content.
+     */
     @Transactional
     public CleansedDataStore ingestAndCleanseJsonPayload(String jsonPayload, String sourceIdentifier) throws JsonProcessingException {
         logger.info("Starting ingestion and cleansing for direct JSON payload with sourceIdentifier: {}", sourceIdentifier);
-        RawDataStore rawDataStore = new RawDataStore();
-        rawDataStore.setSourceUri(sourceIdentifier);
-        rawDataStore.setReceivedAt(OffsetDateTime.now());
 
         if (jsonPayload == null || jsonPayload.trim().isEmpty()) {
             logger.warn("Received empty or null JSON payload for sourceIdentifier: {}.", sourceIdentifier);
+            RawDataStore rawDataStore = new RawDataStore();
+            rawDataStore.setSourceUri(sourceIdentifier);
+            rawDataStore.setReceivedAt(OffsetDateTime.now());
             rawDataStore.setRawContentText(jsonPayload);
             rawDataStore.setRawContentBinary(new byte[0]);
             rawDataStore.setStatus("EMPTY_PAYLOAD");
@@ -102,15 +116,51 @@ public class DataIngestionService {
             return createAndSaveErrorCleansedDataStore(rawDataStore, "SOURCE_EMPTY_PAYLOAD", "ERROR","PayloadError: Received empty or null JSON payload.");
         }
 
+        String contentHash = calculateContentHash(jsonPayload,null);
+        Optional<RawDataStore> existingRawDataOpt = rawDataStoreRepository.findBySourceUriAndContentHash(sourceIdentifier, contentHash);
+
+        if (existingRawDataOpt.isPresent()) {
+            RawDataStore existingRawData = existingRawDataOpt.get();
+            logger.info("Duplicate content detected for sourceIdentifier: {}. Using existing raw_data_id: {}", sourceIdentifier, existingRawData.getId());
+            Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findByRawDataId(existingRawData.getId());
+            if(existingCleansedData.isPresent()){
+                logger.info("Found existing cleansed data for raw_data_id: {}. Skipping processing.", existingRawData.getId());
+                return existingCleansedData.get();
+            } else {
+                logger.info("No existing cleansed data for raw_data_id: {}. Proceeding with processing.", existingRawData.getId());
+                return processLoadedContent(jsonPayload, sourceIdentifier, existingRawData);
+            }
+        }
+
+        RawDataStore rawDataStore = new RawDataStore();
+        rawDataStore.setSourceUri(sourceIdentifier);
+        rawDataStore.setReceivedAt(OffsetDateTime.now());
         rawDataStore.setRawContentText(jsonPayload);
         rawDataStore.setRawContentBinary(jsonPayload.getBytes(StandardCharsets.UTF_8));
+        rawDataStore.setContentHash(contentHash);
         rawDataStore.setStatus("RECEIVED_API_PAYLOAD");
+
+        // Versioning logic
+        List<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceIdentifier);
+        if (!latestVersionOpt.isEmpty()) {
+            RawDataStore latestVersion = latestVersionOpt.get(0);
+            latestVersion.setLatest(false);
+            rawDataStoreRepository.save(latestVersion);
+            rawDataStore.setVersion(latestVersion.getVersion() + 1);
+        } else {
+            rawDataStore.setVersion(1);
+        }
+
         RawDataStore savedRawDataStore = rawDataStoreRepository.save(rawDataStore);
-        logger.info("Stored raw data from payload with ID: {} for sourceIdentifier: {}", savedRawDataStore.getId(), sourceIdentifier);
+        logger.info("Stored new raw data from payload with ID: {} for sourceIdentifier: {}", savedRawDataStore.getId(), sourceIdentifier);
 
         return processLoadedContent(jsonPayload, sourceIdentifier, savedRawDataStore);
     }
 
+    /**
+     * Loads JSON from configured path and processes it.
+     * Handles both S3 and classpath loading strategies.
+     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile() throws JsonProcessingException {
         try {
@@ -137,6 +187,10 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Handles ingestion for a specific identifier (s3:// or classpath:).
+     * Performs validation, raw storage, deduplication, and cleansing.
+     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile(String identifier) throws IOException {
         logger.info("Starting ingestion and cleansing for identifier: {}", identifier);
@@ -195,22 +249,65 @@ public class DataIngestionService {
             rawDataStore.setStatus("CLASSPATH_CONTENT_RECEIVED");
         }
 
-        if (rawJsonContent.trim().isEmpty()) {
+        if (rawJsonContent == null || rawJsonContent.trim().isEmpty()) {
             logger.warn("Raw JSON content from {} is effectively empty after loading.", sourceUriForDb);
             rawDataStore.setRawContentText(rawJsonContent);
             rawDataStore.setStatus("EMPTY_CONTENT_LOADED");
             RawDataStore savedForEmpty = rawDataStoreRepository.save(rawDataStore);
             return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
         }
+        String contextJson = null;
+        try {
+            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
+            if (contextResource.exists()) {
+                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
+                    contextJson = FileCopyUtils.copyToString(reader);
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Could not read context-config.json, continuing without it.", e);
+        }
+        String contentHash = calculateContentHash(rawJsonContent, contextJson);
+        Optional<RawDataStore> existingRawDataOpt = rawDataStoreRepository.findBySourceUriAndContentHash(sourceUriForDb, contentHash);
+
+        if (existingRawDataOpt.isPresent()) {
+            RawDataStore existingRawData = existingRawDataOpt.get();
+            logger.info("Duplicate content detected for source: {}. Using existing raw_data_id: {}", sourceUriForDb, existingRawData.getId());
+            Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findByRawDataId(existingRawData.getId());
+            if(existingCleansedData.isPresent()){
+                logger.info("Found existing cleansed data for raw_data_id: {}. Skipping processing.", existingRawData.getId());
+                return existingCleansedData.get();
+            } else {
+                logger.info("No existing cleansed data for raw_data_id: {}. Proceeding with processing.", existingRawData.getId());
+                return processLoadedContent(rawJsonContent, sourceUriForDb, existingRawData);
+            }
+        }
 
         rawDataStore.setRawContentText(rawJsonContent);
         rawDataStore.setRawContentBinary(rawJsonContent.getBytes(StandardCharsets.UTF_8));
+        rawDataStore.setContentHash(contentHash);
+
+        // Versioning logic
+        List<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceUriForDb);
+        if (!latestVersionOpt.isEmpty()) {
+            RawDataStore latestVersion = latestVersionOpt.get(0);
+            latestVersion.setLatest(false);
+            rawDataStoreRepository.save(latestVersion);
+            rawDataStore.setVersion(latestVersion.getVersion() + 1);
+        } else {
+            rawDataStore.setVersion(1);
+        }
+
         RawDataStore savedRawDataStore = rawDataStoreRepository.save(rawDataStore);
         logger.info("Processed raw data with ID: {} for source: {} with status: {}", savedRawDataStore.getId(), sourceUriForDb, savedRawDataStore.getStatus());
 
         return processLoadedContent(rawJsonContent, sourceUriForDb, savedRawDataStore);
     }
 
+    /**
+     * Takes loaded JSON (string), parses it,
+     * extracts cleanse-able fields, and stores as 'cleansed_data_store'
+     */
     private CleansedDataStore processLoadedContent(String rawJsonContent, String sourceUriForDb, RawDataStore associatedRawDataStore) throws JsonProcessingException {
         List<Map<String, Object>> cleansedContentItems = new ArrayList<>();
         Map<String,Object> cleansingErrorsJson = null;
@@ -233,6 +330,7 @@ public class DataIngestionService {
         cleansedDataStore.setSourceUri(sourceUriForDb);
         cleansedDataStore.setCleansedAt(OffsetDateTime.now());
         cleansedDataStore.setCleansedItems(cleansedContentItems);
+        cleansedDataStore.setVersion(associatedRawDataStore.getVersion());
 
         if (cleansingErrorsJson != null) {
             cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
@@ -253,6 +351,43 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(cleansedDataStore);
     }
 
+    /**
+     * Computes a SHA-256 hash of the JSON + optional context for deduplication.
+     */
+    private String calculateContentHash(String content, String context) {
+        if (content == null || content.isEmpty()) {
+            return null;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(content.getBytes(StandardCharsets.UTF_8));
+            if (context != null && !context.isEmpty()) {
+                digest.update(context.getBytes(StandardCharsets.UTF_8));
+            }
+            byte[] encodedhash = digest.digest();
+            return bytesToHex(encodedhash);
+        } catch (NoSuchAlgorithmException e) {
+            logger.error("SHA-256 algorithm not found", e);
+            throw new RuntimeException("SHA-256 algorithm not found", e);
+        }
+    }
+
+
+    private static String bytesToHex(byte[] hash) {
+        StringBuilder hexString = new StringBuilder(2 * hash.length);
+        for (byte b : hash) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
+    }
+
+    /**
+     * Creates a fallback CleansedDataStore record in case of ingestion/cleansing failure.
+     */
     private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorKeyOrMessagePrefix, String specificErrorMessage) throws JsonProcessingException {
         CleansedDataStore errorCleansedData = new CleansedDataStore();
         if (rawDataStore != null && rawDataStore.getId() != null) {
@@ -274,6 +409,10 @@ public class DataIngestionService {
         return errorMap;
     }
 
+    /**
+     * Recursively traverses JSON to extract "copy", "disclaimer", and "analyticsAttributes".
+     * Applies context to each extractable field.
+     */
     private void findAndExtractRecursive(JsonNode currentNode,
                                          String currentJsonPath,
                                          String inheritedModel,
@@ -347,6 +486,9 @@ public class DataIngestionService {
             }
         }
     }
+    /**
+     * Parses "analyticsAttributes" array and extracts key-value pairs.
+     */
 
     private void processAnalyticsAttributes(JsonNode analyticsArray,
                                             String parentModelHint,
@@ -376,12 +518,16 @@ public class DataIngestionService {
                         // *** MODIFIED: Use 'context' as key ***
                         item.put("context", new HashMap<>(itemContext));
                         results.add(item);
-                       logger.debug("Extracted analytics attribute: {} with context: {}", item, itemContext);
+                        logger.debug("Extracted analytics attribute: {} with context: {}", item, itemContext);
                     }
                 }
             }
         }
     }
+
+    /**
+     * Cleanses embedded templating syntax, HTML, and extra whitespace.
+     */
 
     private static String cleanseCopyText(String text) {
         if (text == null) {

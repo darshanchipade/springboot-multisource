@@ -9,42 +9,30 @@
   "contextRules": [
     {
       "priority": 10,
-      "ruleName": "Specific Financing Ribbon Section by Path and Model",
+      "ruleName": "ACDC Specific Financing Ribbon Section by Path and Model",
       "matchCriteria": {
         "pathContains": "/ipad/composition/ipad-family-items/ribbon-section",
         "modelIs": "ribbon-section"
       },
       "context": {
-        "source": "Rule: Financing Ribbon (Path+Model)",
-        "sectionType": "promotional-ribbon",
-        "campaignFocus": "financing",
+        "source": "ACDC Rule: Financing Ribbon (Path+Model)",
+        "sectionType": "ACDC promotional-ribbon",
+        "campaignFocus": "ACDC financing",
         "ctaType": "learnMoreLink",
         "geoTargeting": ["US", "CA"],
-        "validUntil": "2024-12-31"
-      }
-    },
-    {
-      "priority": 5,
-      "ruleName": "Updated Rule for Ribbon 07-11-25",
-      "matchCriteria": {
-        "pathContains": "/ipad/composition/ipad-family-items/ribbon-section",
-        "modelIs": "ribbon-section"
-      },
-      "context": {
-        "geoTargeting": ["DE"],
         "validUntil": "2024-12-31"
       }
     },
 
     {
       "priority": 20,
-      "ruleName": "Chapter Navigation Item by Model",
+      "ruleName": "ACDC Chapter Navigation Item by Model",
       "matchCriteria": {
         "modelIs": "chapter-nav-item"
       },
       "context": {
-        "source": "Rule: Chapter Nav Item (Model)",
-        "category": "navigationElement",
+        "source": "ACDC Rule: Chapter Nav Item (Model)",
+        "category": "ACDC navigationElement",
         "interactive": true,
         "uiTheme": "light"
       }

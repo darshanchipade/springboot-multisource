@@ -80,6 +80,9 @@ public class EnrichedContentElement {
     @Column(name = "status", columnDefinition = "TEXT")
     private String status;
 
+    @Column(name = "version")
+    private Integer version;
+
     // Constructors
     public EnrichedContentElement() {
     }

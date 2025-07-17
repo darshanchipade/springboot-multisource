@@ -78,4 +78,8 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "saved_at")
     private OffsetDateTime savedAt;
 
+    @Column(name = "version")
+    private Integer version;
+
+
 }

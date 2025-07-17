@@ -56,6 +56,7 @@ public class ConsolidatedSectionService {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
                 section.setId(UUID.randomUUID());
                 section.setCleansedDataId(cleansedData.getId());
+                section.setVersion(cleansedData.getVersion());
                 section.setSourceUri(item.getSourceUri());
                 section.setSectionPath(item.getItemSourcePath());
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
@@ -73,6 +74,7 @@ public class ConsolidatedSectionService {
                 section.setContext(item.getContext());
                 section.setSavedAt(OffsetDateTime.now());
                 section.setStatus(item.getStatus());
+
 
                 consolidatedRepo.save(section);
                 logger.info("Saved new ConsolidatedEnrichedSection ID {} from EnrichedContentElement ID {}", section.getId(), item.getId());
