@@ -119,11 +119,11 @@ public class EnrichmentPipelineService {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
                 continue;
             }
-            Optional<EnrichedContentElement> existingEnrichedElement = enrichedContentElementRepository.findByItemSourcePathAndContentHash(itemDetail.sourcePath, itemDetail.contentHash);
-            if (existingEnrichedElement.isPresent()) {
-                logger.info("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) as it has already been enriched.", cleansedDataStoreId, itemDetail.sourcePath);
-                continue;
-            }
+//            Optional<EnrichedContentElement> existingEnrichedElement = enrichedContentElementRepository.findByItemSourcePathAndContentHash(itemDetail.sourcePath, itemDetail.contentHash);
+//            if (existingEnrichedElement.isPresent()) {
+//                logger.info("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) as it has already been enriched.", cleansedDataStoreId, itemDetail.sourcePath);
+//                continue;
+//            }
             try {
                 Map<String, Object> enrichmentResultsFromBedrock = bedrockRateLimiter.executeSupplier(
                         () -> bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model)

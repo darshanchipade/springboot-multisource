@@ -1,8 +1,10 @@
 package com.apple.springboot.service;
 
 import com.apple.springboot.model.CleansedDataStore;
+import com.apple.springboot.model.ContentHash;
 import com.apple.springboot.model.RawDataStore;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
+import com.apple.springboot.repository.ContentHashRepository;
 import com.apple.springboot.repository.RawDataStoreRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,6 +40,7 @@ public class DataIngestionService {
     private final S3StorageService s3StorageService;
     private final String defaultS3BucketName;
     private final ContextConfigService contextConfigService;
+    private final ContentHashRepository contentHashRepository;
 
     /**
      * Constructs the service with required repositories and config values.
@@ -49,7 +52,7 @@ public class DataIngestionService {
                                 @Value("${app.json.file.path}") String jsonFilePath,
                                 S3StorageService s3StorageService,
                                 @Value("${app.s3.bucket-name}") String defaultS3BucketName,
-                                ContextConfigService contextConfigService) {
+                                ContextConfigService contextConfigService, ContentHashRepository contentHashRepository) {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
@@ -58,6 +61,7 @@ public class DataIngestionService {
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
         this.contextConfigService = contextConfigService;
+        this.contentHashRepository = contentHashRepository;
     }
 
 
@@ -331,10 +335,24 @@ public class DataIngestionService {
         List<Map<String, Object>> newOrUpdatedItems = new ArrayList<>();
         for (Map<String, Object> item : cleansedContentItems) {
             String sourcePath = (String) item.get("sourcePath");
+            String itemType = (String) item.get("itemType");
             String contentHash = (String) item.get("contentHash");
-            Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findBySourceUriAndContentHash(sourcePath, contentHash);
-            if (existingCleansedData.isEmpty()) {
+           // Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findBySourceUriAndContentHash(sourcePath, contentHash);
+
+           // if (existingCleansedData.isEmpty()) {
+
+            Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
+
+            if (existingHashOpt.isPresent()) {
+                if (!existingHashOpt.get().getContentHash().equals(contentHash)) {
+                    newOrUpdatedItems.add(item);
+                    ContentHash contentHashToUpdate = existingHashOpt.get();
+                    contentHashToUpdate.setContentHash(contentHash);
+                    contentHashRepository.save(contentHashToUpdate);
+                }
+            } else {
                 newOrUpdatedItems.add(item);
+                contentHashRepository.save(new ContentHash(sourcePath, itemType, contentHash));
             }
         }
 
@@ -485,9 +503,15 @@ public class DataIngestionService {
                     if (!cleansed.isBlank()) {
                         Map<String, Object> item = new HashMap<>();
                         item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
+                        item.put("itemType", "copy");
                         item.put("originalFieldName", "copy");
                         item.put("cleansedContent", cleansed);
-                        item.put("contentHash", calculateContentHash(cleansed, null));
+                       // item.put("contentHash", calculateContentHash(cleansed, null));
+                        try {
+                            item.put("contentHash", calculateContentHash(cleansed, objectMapper.writeValueAsString(determinedContext)));
+                        } catch (JsonProcessingException e) {
+                            throw new RuntimeException(e);
+                        }
                         if (currentModel != null) item.put("model", currentModel);
                         // *** MODIFIED: Use 'context' as key ***
                         item.put("context", new HashMap<>(determinedContext));
@@ -504,8 +528,14 @@ public class DataIngestionService {
                 if (!cleansed.isBlank()) {
                     Map<String, Object> item = new HashMap<>();
                     item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".disclaimer");
+                    item.put("itemType", "disclaimer");
                     item.put("originalFieldName", "disclaimer");
                     item.put("cleansedContent", cleansed);
+                    try {
+                        item.put("contentHash", calculateContentHash(cleansed, objectMapper.writeValueAsString(determinedContext)));
+                    } catch (JsonProcessingException e) {
+                        throw new RuntimeException(e);
+                    }
                     if (currentModel != null) item.put("model", currentModel);
                     // *** MODIFIED: Use 'context' as key ***
                     item.put("context", new HashMap<>(determinedContext));
@@ -567,9 +597,14 @@ public class DataIngestionService {
                     if (!cleansedValue.isBlank()) {
                         Map<String, Object> item = new HashMap<>();
                         item.put("sourcePath", analyticsPath);
+                        item.put("itemType", "analyticsAttribute");
                         item.put("originalFieldName", name);
                         item.put("cleansedContent", cleansedValue);
-                        item.put("contentHash", calculateContentHash(cleansedValue, null));
+                        try {
+                            item.put("contentHash", calculateContentHash(cleansedValue, objectMapper.writeValueAsString(itemContext)));
+                        } catch (JsonProcessingException e) {
+                            throw new RuntimeException(e);
+                        }
 
                         if (analyticsModel != null) {
                             item.put("model", analyticsModel);
