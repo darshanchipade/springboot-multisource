@@ -20,12 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 // import java.io.IOException; // Not strictly needed for this version
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -52,6 +47,7 @@ public class EnrichmentPipelineService {
         public String cleansedContent;
         public String model;
         public Map<String, Object> context; // MODIFIED for context
+        public String contentHash;
     }
 
     public EnrichmentPipelineService(BedrockEnrichmentService bedrockEnrichmentService,
@@ -94,7 +90,7 @@ public class EnrichmentPipelineService {
 
         cleansedDataEntry.setStatus("ENRICHMENT_IN_PROGRESS");
         cleansedDataStoreRepository.save(cleansedDataEntry);
-        consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry); // Ensured this is uncommented
+        //consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry); // Ensured this is uncommented
 
         List<CleansedItemDetail> itemsToEnrich;
         List<Map<String, Object>> maps = cleansedDataEntry.getCleansedItems();
@@ -123,6 +119,11 @@ public class EnrichmentPipelineService {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
                 continue;
             }
+            Optional<EnrichedContentElement> existingEnrichedElement = enrichedContentElementRepository.findByItemSourcePathAndContentHash(itemDetail.sourcePath, itemDetail.contentHash);
+            if (existingEnrichedElement.isPresent()) {
+                logger.info("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) as it has already been enriched.", cleansedDataStoreId, itemDetail.sourcePath);
+                continue;
+            }
             try {
                 Map<String, Object> enrichmentResultsFromBedrock = bedrockRateLimiter.executeSupplier(
                         () -> bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model)
@@ -139,6 +140,7 @@ public class EnrichmentPipelineService {
                 itemProcessingErrors.add(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
             }
         }
+        consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry);
         updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
     }
 
@@ -158,6 +160,7 @@ public class EnrichmentPipelineService {
             detail.originalFieldName = map.get("originalFieldName") != null ? map.get("originalFieldName").toString() : null;
             detail.cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
             detail.model = map.get("model") != null ? map.get("model").toString() : null;
+            detail.contentHash = map.get("contentHash") != null ? map.get("contentHash").toString() : null;
 
             // *** MODIFIED: Read "context" key ***
             if (map.containsKey("context") && map.get("context") instanceof Map) {
@@ -198,6 +201,7 @@ public class EnrichmentPipelineService {
         enrichedElement.setItemOriginalFieldName(itemDetail.originalFieldName);
         enrichedElement.setItemModelHint(itemDetail.model);
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
+        enrichedElement.setContentHash(itemDetail.contentHash);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
         // *** MODIFIED: Use setContext and ensure itemDetail.context is handled if null ***
         enrichedElement.setContext(itemDetail.context != null ? new HashMap<>(itemDetail.context) : Collections.emptyMap());

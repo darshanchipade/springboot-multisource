@@ -106,11 +106,38 @@ public class ContextConfigService {
         return Collections.unmodifiableMap(new HashMap<>(defaultContext));
     }
 
+//    public Map<String, Object> getContext(String model, String path) {
+//        if (path == null) path = "";
+//        if (model == null) model = "";
+//
+//        Map<String, Object> mergedContext = new HashMap<>(defaultContext);
+//        List<String> matchedRuleNames = new ArrayList<>();
+//
+//        for (ContextRule rule : contextRules) {
+//            if (matches(rule.matchCriteria, model, path)) {
+//                logger.debug("Rule '{}' (priority {}) matched for model '{}', path '{}'. Merging context.",
+//                        rule.ruleName, rule.priority, model, path);
+//                matchedRuleNames.add(rule.ruleName + " (priority " + rule.priority + ")");
+//                mergeContextsAggressively(mergedContext, rule.context);
+//            }
+//        }
+//
+//        if (matchedRuleNames.isEmpty()) {
+//            logger.debug("No specific rules matched for model '{}', path '{}'. Returning default context.", model, path);
+//        } else {
+//            // mergedContext.put("appliedRuleNames", matchedRuleNames); // Optional for debugging
+//            logger.info("Final merged context for model '{}', path '{}' from rules: {}. Context: {}",
+//                    model, path, matchedRuleNames, mergedContext);
+//        }
+//        return Collections.unmodifiableMap(mergedContext);
+//    }
+
+
     public Map<String, Object> getContext(String model, String path) {
         if (path == null) path = "";
         if (model == null) model = "";
 
-        Map<String, Object> mergedContext = new HashMap<>(defaultContext);
+        Map<String, Object> mergedContext = new HashMap<>();
         List<String> matchedRuleNames = new ArrayList<>();
 
         for (ContextRule rule : contextRules) {
@@ -124,52 +151,54 @@ public class ContextConfigService {
 
         if (matchedRuleNames.isEmpty()) {
             logger.debug("No specific rules matched for model '{}', path '{}'. Returning default context.", model, path);
+            if (defaultContext != null) {
+                mergedContext.putAll(defaultContext);
+            }
         } else {
-            // mergedContext.put("appliedRuleNames", matchedRuleNames); // Optional for debugging
             logger.info("Final merged context for model '{}', path '{}' from rules: {}. Context: {}",
                     model, path, matchedRuleNames, mergedContext);
         }
+
         return Collections.unmodifiableMap(mergedContext);
     }
+
 
     @SuppressWarnings("unchecked")
     private void mergeContextsAggressively(Map<String, Object> baseContext, Map<String, Object> newRuleContext) {
         if (newRuleContext == null) return;
 
-        // newRuleContext.forEach((key, valueFromNewRule) -> {
         for (Map.Entry<String, Object> entry : newRuleContext.entrySet()) {
             String key = entry.getKey();
-            Object valueFromNewRule = entry.getValue();
-            if (baseContext.containsKey(key)) {
-                Object valueInBase = baseContext.get(key);
-                List<Object> combinedList;
+            Object newValue = entry.getValue();
 
-                if (valueInBase instanceof List) {
-                    combinedList = new ArrayList<>((List<Object>) valueInBase);
-                } else {
-                    combinedList = new ArrayList<>();
-                    combinedList.add(valueInBase);
-                }
+            if (!baseContext.containsKey(key)) {
+                baseContext.put(key, newValue);
+                continue;
+            }
 
-                if (valueFromNewRule instanceof List) {
-                    ((List<Object>) valueFromNewRule).forEach(item -> {
-                        if (!combinedList.contains(item)) { // Add if not already present
-                            combinedList.add(item);
-                        }
-                    });
-                } else {
-                    if (!combinedList.contains(valueFromNewRule)) {
-                        combinedList.add(valueFromNewRule);
+            Object existingValue = baseContext.get(key);
+            List<Object> mergedList = new ArrayList<>();
+
+            if (existingValue instanceof List) {
+                mergedList.addAll((List<Object>) existingValue);
+            } else {
+                mergedList.add(existingValue);
+            }
+
+            if (newValue instanceof List) {
+                for (Object item : (List<Object>) newValue) {
+                    if (!mergedList.contains(item)) {
+                        mergedList.add(item);
                     }
                 }
-                // If after merging, the list has only one item, and it's not one of our intentionally multi-valued keys,
-                // consider reverting to a single value. For now, let's keep them as lists if they become lists.
-                baseContext.put(key, combinedList);
             } else {
-                // New key, just add it. If it's a list from the rule, it's added as a list.
-                baseContext.put(key, valueFromNewRule);
+                if (!mergedList.contains(newValue)) {
+                    mergedList.add(newValue);
+                }
             }
-        };
+
+            baseContext.put(key, mergedList);
+        }
     }
 
     private boolean matches(Map<String, String> criteria, String model, String path) {

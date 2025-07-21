@@ -49,8 +49,8 @@ public class ConsolidatedSectionService {
                 return;
             }
 
-            boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedText(
-                    item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText());
+            boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedTextAndVersion(
+                    item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText(), cleansedData.getVersion());
 
             if (!exists) {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
@@ -61,6 +61,7 @@ public class ConsolidatedSectionService {
                 section.setSectionPath(item.getItemSourcePath());
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
                 section.setCleansedText(item.getCleansedText());
+                section.setContentHash(item.getContentHash());
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());
                 section.setKeywords(item.getKeywords());
@@ -74,7 +75,6 @@ public class ConsolidatedSectionService {
                 section.setContext(item.getContext());
                 section.setSavedAt(OffsetDateTime.now());
                 section.setStatus(item.getStatus());
-
 
                 consolidatedRepo.save(section);
                 logger.info("Saved new ConsolidatedEnrichedSection ID {} from EnrichedContentElement ID {}", section.getId(), item.getId());

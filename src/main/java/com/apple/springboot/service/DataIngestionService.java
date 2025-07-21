@@ -144,8 +144,10 @@ public class DataIngestionService {
         List<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceIdentifier);
         if (!latestVersionOpt.isEmpty()) {
             RawDataStore latestVersion = latestVersionOpt.get(0);
-            latestVersion.setLatest(false);
-            rawDataStoreRepository.save(latestVersion);
+            if (latestVersion.getLatest()) {
+                latestVersion.setLatest(false);
+                rawDataStoreRepository.save(latestVersion);
+            }
             rawDataStore.setVersion(latestVersion.getVersion() + 1);
         } else {
             rawDataStore.setVersion(1);
@@ -291,8 +293,10 @@ public class DataIngestionService {
         List<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceUriForDb);
         if (!latestVersionOpt.isEmpty()) {
             RawDataStore latestVersion = latestVersionOpt.get(0);
-            latestVersion.setLatest(false);
-            rawDataStoreRepository.save(latestVersion);
+            if (latestVersion.getLatest()) {
+                latestVersion.setLatest(false);
+                rawDataStoreRepository.save(latestVersion);
+            }
             rawDataStore.setVersion(latestVersion.getVersion() + 1);
         } else {
             rawDataStore.setVersion(1);
@@ -324,13 +328,61 @@ public class DataIngestionService {
             rawDataStoreRepository.save(associatedRawDataStore);
             return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "EXTRACTION ERROR","ExtractionError: " + e.getMessage());
         }
+        List<Map<String, Object>> newOrUpdatedItems = new ArrayList<>();
+        for (Map<String, Object> item : cleansedContentItems) {
+            String sourcePath = (String) item.get("sourcePath");
+            String contentHash = (String) item.get("contentHash");
+            Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findBySourceUriAndContentHash(sourcePath, contentHash);
+            if (existingCleansedData.isEmpty()) {
+                newOrUpdatedItems.add(item);
+            }
+        }
+
+        if (newOrUpdatedItems.isEmpty()) {
+            logger.info("No new or updated content to process for raw_data_id: {}", associatedRawDataStore.getId());
+            associatedRawDataStore.setStatus("PROCESSED_NO_CHANGES");
+            rawDataStoreRepository.save(associatedRawDataStore);
+            // find and return existing cleansed data store
+            return cleansedDataStoreRepository.findByRawDataId(associatedRawDataStore.getId()).orElse(null);
+        }
 
         CleansedDataStore cleansedDataStore = new CleansedDataStore();
         cleansedDataStore.setRawDataId(associatedRawDataStore.getId());
         cleansedDataStore.setSourceUri(sourceUriForDb);
         cleansedDataStore.setCleansedAt(OffsetDateTime.now());
-        cleansedDataStore.setCleansedItems(cleansedContentItems);
+        cleansedDataStore.setCleansedItems(newOrUpdatedItems);
         cleansedDataStore.setVersion(associatedRawDataStore.getVersion());
+        try {
+            cleansedDataStore.setContentHash(calculateContentHash(objectMapper.writeValueAsString(newOrUpdatedItems), null));
+        } catch (JsonProcessingException e) {
+            logger.error("Error serializing cleansed items to calculate hash", e);
+        }
+
+        // MODIFIED for context
+       // Map<String, Object> determinedContext = this.contextConfigService.getContext(null, sourceUriForDb);
+        //cleansedDataStore.setContext(determinedContext);
+        try {
+            String contextJson = null;
+            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
+            if (contextResource.exists()) {
+                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
+                    contextJson = FileCopyUtils.copyToString(reader);
+                }
+            }
+            if (contextJson != null) {
+                JsonNode contextNode = objectMapper.readTree(contextJson);
+                String model = contextNode.has("model") ? contextNode.get("model").asText() : null;
+                String sourcePath = contextNode.has("sourcePath") ? contextNode.get("sourcePath").asText() : null;
+                Map<String, Object> determinedContext = this.contextConfigService.getContext(model, sourcePath);
+                cleansedDataStore.setContext(determinedContext);
+            }
+        } catch (IOException e) {
+            logger.warn("Could not read context-config.json, continuing without it.", e);
+        }
+
+        if (cleansingErrorsJson != null) {
+        cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
+    }
 
         if (cleansingErrorsJson != null) {
             cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
@@ -338,7 +390,7 @@ public class DataIngestionService {
 
         if ("EXTRACTION_ERROR".equals(associatedRawDataStore.getStatus())) {
             cleansedDataStore.setStatus("CLEANSING_FAILED");
-        } else if (cleansedContentItems.isEmpty()) {
+        } else if (newOrUpdatedItems.isEmpty())  {
             logger.info("No content items extracted for raw_data_id: {}. Status set to 'NO_CONTENT_EXTRACTED'.", associatedRawDataStore.getId());
             cleansedDataStore.setStatus("NO_CONTENT_EXTRACTED");
             associatedRawDataStore.setStatus("PROCESSED_EMPTY_ITEMS");
@@ -435,6 +487,7 @@ public class DataIngestionService {
                         item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
                         item.put("originalFieldName", "copy");
                         item.put("cleansedContent", cleansed);
+                        item.put("contentHash", calculateContentHash(cleansed, null));
                         if (currentModel != null) item.put("model", currentModel);
                         // *** MODIFIED: Use 'context' as key ***
                         item.put("context", new HashMap<>(determinedContext));
@@ -461,11 +514,15 @@ public class DataIngestionService {
                 }
             }
             //"analyticsAttributes" array
-            JsonNode analyticsArrayNode = currentNode.get("analyticsAttributes");
-            if (analyticsArrayNode != null && analyticsArrayNode.isArray()) {
-                // Pass the parent's determined context as a potential fallback/reference if needed
-                processAnalyticsAttributes(analyticsArrayNode, currentModel, currentSourcePath != null ? currentSourcePath : currentJsonPath, results);
-            }
+            // Process all fields that end with 'AnalyticsAttributes' and are arrays (e.g. analyticsAttributes, galleryAnalyticsAttributes)
+            currentNode.fields().forEachRemaining(entry -> {
+                String key = entry.getKey();
+                JsonNode value = entry.getValue();
+                if (key.toLowerCase().endsWith("analyticsattributes") && value.isArray()) {
+                    logger.debug("Processing analytics array: {} at path: {}", key, currentJsonPath);
+                    processAnalyticsAttributes(value, currentModel, currentSourcePath != null ? currentSourcePath : currentJsonPath, results);
+                }
+            });
 
             // Recurse into all other fields — including "copy" when it's an object/array, and "_meta" etc.
             currentNode.fields().forEachRemaining(entry -> {
@@ -474,11 +531,12 @@ public class DataIngestionService {
                 //commented for the nested copy
                 // if (!Set.of("_model", "_path", "copy", "analyticsAttributes", "disclaimer").contains(fieldKey)) {
                 // Only skip _model and _path — recurse into all others, including "copy", "disclaimer", etc.
-                if (!Set.of("_model", "_path").contains(fieldKey)) {
+                if (!Set.of("_model", "_path", "copy", "disclaimer", "analyticsAttributes").contains(fieldKey)) {
                     String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
                     findAndExtractRecursive(fieldValue, newJsonPath, currentModel, currentSourcePath, results);
                 }
             });
+
         } else if (currentNode.isArray()) {
             for (int i = 0; i < currentNode.size(); i++) {
                 String newJsonPath = currentJsonPath + "[" + i + "]";
@@ -511,6 +569,7 @@ public class DataIngestionService {
                         item.put("sourcePath", analyticsPath);
                         item.put("originalFieldName", name);
                         item.put("cleansedContent", cleansedValue);
+                        item.put("contentHash", calculateContentHash(cleansedValue, null));
 
                         if (analyticsModel != null) {
                             item.put("model", analyticsModel);

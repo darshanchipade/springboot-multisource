@@ -8,33 +8,102 @@
   },
   "contextRules": [
     {
-      "priority": 10,
-      "ruleName": "ACDC Specific Financing Ribbon Section by Path and Model",
+      "priority": 1,
+      "ruleName": "Horizontal Subbanner section Headline",
       "matchCriteria": {
-        "pathContains": "/ipad/composition/ipad-family-items/ribbon-section",
-        "modelIs": "ribbon-section"
+        "pathContains": "/ipad-family/horizontal-banner-section/subHeadlineText-Test-1-Scenario-1",
+        "modelIs": "markdown-inline-copy"
       },
       "context": {
-        "source": "ACDC Rule: Financing Ribbon (Path+Model)",
-        "sectionType": "ACDC promotional-ribbon",
-        "campaignFocus": "ACDC financing",
-        "ctaType": "learnMoreLink",
-        "geoTargeting": ["US", "CA"],
-        "validUntil": "2024-12-31"
+        "sectionType": "horizontal section subHeadlineText-Test-1-Scenario-1",
+        "geoTargeting": ["DL","UK"],
+        "Title": "SCENARIO 4 - Same JSON COPY and NEW CONTEXT entry SUBHEADLINE TEXT"
+      }
+    },
+    {
+      "priority": 2,
+      "ruleName": "Horizontal Subbanner section Headline",
+      "matchCriteria": {
+        "pathContains": "/ipad-family/horizontal-banner-section/subHeadlineText-Test-1-Scenario-1",
+        "modelIs": "markdown-inline-copy"
+      },
+      "context": {
+        "sectionType": "horizontal section subHeadlineText-Test-1-Scenario-1",
+        "geoTargeting": ["ENG"],
+        "Title": "SCENARIO 4 - SAme JSON and NEW CONTEXT entry SUBHEADLINE TEXT"
       }
     },
 
     {
-      "priority": 20,
-      "ruleName": "ACDC Chapter Navigation Item by Model",
+      "priority": 3,
+      "ruleName": "Horizontal Banner item paddleNav analyticsattribute next-Analytics-Test-1-Scenario-1",
       "matchCriteria": {
-        "modelIs": "chapter-nav-item"
+        "pathContains": "ac-type-analaytics-subHeadlineText-Test-1-Scenario-1",
+        "modelIs": "analytics"
       },
       "context": {
-        "source": "ACDC Rule: Chapter Nav Item (Model)",
-        "category": "ACDC navigationElement",
-        "interactive": true,
-        "uiTheme": "light"
+        "sectionType": "horizontal-banner-card-items Analytics Next",
+        "geoTargeting": ["JP","TN"],
+        "Title": "Next Analytics-Test-1-Scenario-3"
+      }
+    },
+    {
+      "priority": 4,
+      "ruleName": "Horizontal Banner item paddleNav analyticsattribute next-Analytics-Test-1-Scenario-1",
+      "matchCriteria": {
+        "pathContains": "ac-type-analaytics-subHeadlineText-Test-1-Scenario-1",
+        "modelIs": "analytics"
+      },
+      "context": {
+        "sectionType": "horizontal-banner-card-items Analytics Next",
+        "geoTargeting": ["LONDON"],
+        "Title": "Next Analytics-Test-1-Scenario-4"
+      }
+    },
+    {
+      "priority": 5,
+      "ruleName": "ProductModelAttributeMode",
+      "matchCriteria": {
+        "pathContains": "/content/dam/applecom-cms/live/en_US/ipad/content/common/tout-table/feature-ai",
+        "modelIs": "markdown-inline-copy"
+      },
+      "context": {
+        "sectionType": "AI Feature copy TEST TEST TEST",
+        "geoTargeting": ["USA"],
+        "featureName": "Apple Intelligence"
+      }
+    },
+    {
+      "priority": 6,
+      "ruleName": "ai-tout-attribute",
+      "matchCriteria": {
+        "pathContains": "/content/dam/applecom-cms/live/en_US/ipad/composition/shared/product-tiles/ipad-pro-items/tout-column-items/ai-tout-attribute",
+        "modelIs": "tout-attribute"
+      },
+      "context": {
+        "type": "glyph"
+      }
+    },
+    {
+      "priority": 7,
+      "ruleName": "ai-tout-attribute",
+      "matchCriteria": {
+        "pathContains": "/content/dam/applecom-cms/live/en_US/ipad/content/common/tout-table/ai-caption",
+        "modelIs": "markdown-inline-copy"
+      },
+      "context": {
+        "textType": "markdown"
+      }
+    },
+    {
+      "priority": 8,
+      "ruleName": "ai-tout-attribute",
+      "matchCriteria": {
+        "pathContains": "/content/dam/applecom-cms/live/en_US/ipad/content/legal/tech-specs-and-features/apple-intelligence/ai-availability",
+        "modelIs": "markdown-inline-copy"
+      },
+      "context": {
+        "categories": "legal"
       }
     }
   ]

@@ -81,5 +81,8 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "version")
     private Integer version;
 
+    @Column(name = "content_hash")
+    private String contentHash;
+
 
 }
