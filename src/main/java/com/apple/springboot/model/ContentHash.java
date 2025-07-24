@@ -11,7 +11,7 @@ import java.util.Objects;
 @Getter
 @Entity
 @Table(name = "content_hashes")
-@IdClass(ContentHash.ContentHashId.class)
+@IdClass(ContentHashId.class)
 public class ContentHash {
 
     @Id
@@ -25,38 +25,17 @@ public class ContentHash {
     @Column(name = "content_hash", nullable = false, columnDefinition = "TEXT")
     private String contentHash;
 
+    @Column(name = "context_hash", nullable = true, columnDefinition = "TEXT")
+    private String contextHash;
+
     public ContentHash() {
     }
 
-    public ContentHash(String sourcePath, String itemType, String contentHash) {
+    public ContentHash(String sourcePath, String itemType, String contentHash, String contextHash) {
         this.sourcePath = sourcePath;
         this.itemType = itemType;
         this.contentHash = contentHash;
+        this.contextHash = contextHash;
     }
 
-    public static class ContentHashId implements Serializable {
-        private String sourcePath;
-        private String itemType;
-
-        public ContentHashId() {
-        }
-
-        public ContentHashId(String sourcePath, String itemType) {
-            this.sourcePath = sourcePath;
-            this.itemType = itemType;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            ContentHashId that = (ContentHashId) o;
-            return Objects.equals(sourcePath, that.sourcePath) && Objects.equals(itemType, that.itemType);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(sourcePath, itemType);
-        }
-    }
 }

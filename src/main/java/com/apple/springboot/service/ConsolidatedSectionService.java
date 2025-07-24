@@ -2,8 +2,10 @@ package com.apple.springboot.service;
 
 import com.apple.springboot.model.CleansedDataStore;
 import com.apple.springboot.model.ConsolidatedEnrichedSection;
+import com.apple.springboot.model.ContentHash;
 import com.apple.springboot.model.EnrichedContentElement;
 import com.apple.springboot.repository.ConsolidatedEnrichedSectionRepository;
+import com.apple.springboot.repository.ContentHashRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 // import lombok.RequiredArgsConstructor; // Not used, can be removed if not needed elsewhere
 import org.slf4j.Logger;
@@ -15,6 +17,7 @@ import javax.transaction.Transactional;
 import java.time.OffsetDateTime;
 import java.util.List;
 // import java.util.Map; // Not used
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -31,11 +34,14 @@ public class ConsolidatedSectionService {
 
     private final EnrichedContentElementRepository enrichedRepo;
     private final ConsolidatedEnrichedSectionRepository consolidatedRepo;
+    private final ContentHashRepository contentHashRepository;
+
 
     public ConsolidatedSectionService(EnrichedContentElementRepository enrichedRepo,
-                                      ConsolidatedEnrichedSectionRepository consolidatedRepo) {
+                                      ConsolidatedEnrichedSectionRepository consolidatedRepo, ContentHashRepository contentHashRepository) {
         this.enrichedRepo = enrichedRepo;
         this.consolidatedRepo = consolidatedRepo;
+        this.contentHashRepository = contentHashRepository;
     }
 
     @Transactional
@@ -51,7 +57,6 @@ public class ConsolidatedSectionService {
 
             boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedTextAndVersion(
                     item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText(), cleansedData.getVersion());
-
             if (!exists) {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
                 section.setId(UUID.randomUUID());
@@ -61,7 +66,9 @@ public class ConsolidatedSectionService {
                 section.setSectionPath(item.getItemSourcePath());
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
                 section.setCleansedText(item.getCleansedText());
-                section.setContentHash(item.getContentHash());
+                contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                        .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
+                //section.setContentHash(item.getContentHash());
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());
                 section.setKeywords(item.getKeywords());

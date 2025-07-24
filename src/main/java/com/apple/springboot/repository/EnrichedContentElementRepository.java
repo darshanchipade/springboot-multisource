@@ -12,5 +12,6 @@ import java.util.UUID;
 public interface EnrichedContentElementRepository extends JpaRepository<EnrichedContentElement, UUID> {
     // Add custom query methods here if needed
     List<EnrichedContentElement> findAllByCleansedDataId(UUID cleansedDataId);
-    Optional<EnrichedContentElement> findByItemSourcePathAndContentHash(String itemSourcePath, String contentHash);
+    //Optional<EnrichedContentElement> findByItemSourcePathAndContentHash(String itemSourcePath, String contentHash);
+    Optional<EnrichedContentElement> findByItemSourcePathAndItemOriginalFieldName(String itemSourcePath, String itemOriginalFieldName);
 }

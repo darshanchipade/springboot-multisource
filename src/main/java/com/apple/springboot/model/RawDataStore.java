@@ -49,6 +49,9 @@ public class RawDataStore {
     @Column(name = "content_hash", columnDefinition = "TEXT")
     private String contentHash;
 
+    @Column(name = "source_content_type", columnDefinition = "TEXT")
+    private String sourceContentType;
+
     @Column(name = "version")
     private Integer version = 1;
 
@@ -74,6 +77,11 @@ public class RawDataStore {
     public String getContentHash() { return contentHash; }
 
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
+
+    public String getSourceContentType() { return sourceContentType; }
+
+    public void setSourceContentType(String sourceContentType) { this.sourceContentType = sourceContentType; }
+
 
     public Integer getVersion() {
         return version;

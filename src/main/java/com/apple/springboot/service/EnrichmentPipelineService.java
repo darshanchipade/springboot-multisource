@@ -9,8 +9,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 // import com.fasterxml.jackson.databind.JsonNode; // Not strictly needed for this version
 // import com.fasterxml.jackson.databind.node.ObjectNode; // Not strictly needed for this version
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+//import io.github.resilience4j.ratelimiter.RateLimiter;
+//import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 
 import org.slf4j.Logger;
@@ -38,7 +38,7 @@ public class EnrichmentPipelineService {
     private final EnrichedContentElementRepository enrichedContentElementRepository;
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
-    private final RateLimiter bedrockRateLimiter;
+   // private final RateLimiter bedrockRateLimiter;
     private final ConsolidatedSectionService consolidatedSectionService;
 
     private static class CleansedItemDetail {
@@ -54,12 +54,11 @@ public class EnrichmentPipelineService {
                                      EnrichedContentElementRepository enrichedContentElementRepository,
                                      CleansedDataStoreRepository cleansedDataStoreRepository,
                                      ObjectMapper objectMapper,
-                                     RateLimiterRegistry rateLimiterRegistry, ConsolidatedSectionService consolidatedSectionService) {
+                                     ConsolidatedSectionService consolidatedSectionService) {
         this.bedrockEnrichmentService = bedrockEnrichmentService;
         this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
-        this.bedrockRateLimiter = rateLimiterRegistry.rateLimiter("bedrock");
         this.consolidatedSectionService = consolidatedSectionService;
     }
 
@@ -125,9 +124,11 @@ public class EnrichmentPipelineService {
 //                continue;
 //            }
             try {
-                Map<String, Object> enrichmentResultsFromBedrock = bedrockRateLimiter.executeSupplier(
-                        () -> bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model)
-                );
+                //Map<String, Object> enrichmentResultsFromBedrock = bedrockRateLimiter.executeSupplier(
+                //        () -> bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model)
+                //);
+                //Thread.sleep(1000);
+                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model);
                 saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
                 successCount.incrementAndGet();
             } catch (RequestNotPermitted rnp) {
@@ -201,7 +202,7 @@ public class EnrichmentPipelineService {
         enrichedElement.setItemOriginalFieldName(itemDetail.originalFieldName);
         enrichedElement.setItemModelHint(itemDetail.model);
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
-        enrichedElement.setContentHash(itemDetail.contentHash);
+        //enrichedElement.setContentHash(itemDetail.contentHash);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
         // *** MODIFIED: Use setContext and ensure itemDetail.context is handled if null ***
         enrichedElement.setContext(itemDetail.context != null ? new HashMap<>(itemDetail.context) : Collections.emptyMap());

@@ -41,27 +41,31 @@ public class DataIngestionService {
     private final String defaultS3BucketName;
     private final ContextConfigService contextConfigService;
     private final ContentHashRepository contentHashRepository;
+    private final ContextUpdateService contextUpdateService;
 
     /**
      * Constructs the service with required repositories and config values.
      */
     public DataIngestionService(RawDataStoreRepository rawDataStoreRepository,
                                 CleansedDataStoreRepository cleansedDataStoreRepository,
+                                ContentHashRepository contentHashRepository,
                                 ObjectMapper objectMapper,
                                 ResourceLoader resourceLoader,
                                 @Value("${app.json.file.path}") String jsonFilePath,
                                 S3StorageService s3StorageService,
                                 @Value("${app.s3.bucket-name}") String defaultS3BucketName,
-                                ContextConfigService contextConfigService, ContentHashRepository contentHashRepository) {
+                                ContextConfigService contextConfigService,
+                                ContextUpdateService contextUpdateService) {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
+        this.contentHashRepository = contentHashRepository;
+        this.contextUpdateService = contextUpdateService;
         this.objectMapper = objectMapper;
         this.resourceLoader = resourceLoader;
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
         this.contextConfigService = contextConfigService;
-        this.contentHashRepository = contentHashRepository;
     }
 
 
@@ -143,6 +147,16 @@ public class DataIngestionService {
         rawDataStore.setRawContentBinary(jsonPayload.getBytes(StandardCharsets.UTF_8));
         rawDataStore.setContentHash(contentHash);
         rawDataStore.setStatus("RECEIVED_API_PAYLOAD");
+        rawDataStore.setSourceContentType("application/json");
+        try{
+        JsonNode rootNode = objectMapper.readTree(jsonPayload);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_model");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_path");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("copy");
+        rawDataStore.setSourceMetadata(objectMapper.writeValueAsString(rootNode));
+    } catch (JsonProcessingException e) {
+        logger.error("Error processing JSON payload to extract metadata", e);
+    }
 
         // Versioning logic
         List<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceIdentifier);
@@ -211,6 +225,22 @@ public class DataIngestionService {
             try {
                 S3ObjectDetails s3Details = parseS3Uri(sourceUriForDb);
                 rawJsonContent = s3StorageService.downloadFileContent(s3Details.bucketName, s3Details.fileKey);
+                //setting up source content type
+                if (s3Details.fileKey.endsWith(".json")) {
+                    rawDataStore.setSourceContentType("application/json");
+                } else {
+                    rawDataStore.setSourceContentType("application/octet-stream");
+                }
+
+                try {
+                    JsonNode rootNode = objectMapper.readTree(rawJsonContent);
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_model");
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_path");
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("copy");
+                    rawDataStore.setSourceMetadata(objectMapper.writeValueAsString(rootNode));
+                } catch (JsonProcessingException e) {
+                    logger.error("Error processing JSON payload to extract metadata", e);
+                }
                 if (rawJsonContent == null) {
                     logger.warn("File not found or content is null from S3 URI: {}.", sourceUriForDb);
                     rawDataStore.setStatus("S3_FILE_NOT_FOUND_OR_EMPTY");
@@ -235,6 +265,7 @@ public class DataIngestionService {
         } else {
             sourceUriForDb = identifier.startsWith("classpath:") ? identifier : "classpath:" + identifier;
             rawDataStore.setSourceUri(sourceUriForDb);
+            rawDataStore.setSourceContentType("application/json");
             logger.info("Identifier is a classpath resource: {}", sourceUriForDb);
             Resource resource = resourceLoader.getResource(sourceUriForDb);
             if (!resource.exists()) {
@@ -252,6 +283,15 @@ public class DataIngestionService {
                 rawDataStoreRepository.save(rawDataStore);
                 return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_READ_ERROR", "READ ERROR","IOError: " + e.getMessage());
             }
+        try{
+            JsonNode rootNode = objectMapper.readTree(rawJsonContent);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_model");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_path");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("copy");
+            rawDataStore.setSourceMetadata(objectMapper.writeValueAsString(rootNode));
+        } catch (JsonProcessingException e) {
+            logger.error("Error processing JSON payload to extract metadata", e);
+        }
             rawDataStore.setStatus("CLASSPATH_CONTENT_RECEIVED");
         }
 
@@ -333,34 +373,38 @@ public class DataIngestionService {
             return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "EXTRACTION ERROR","ExtractionError: " + e.getMessage());
         }
         List<Map<String, Object>> newOrUpdatedItems = new ArrayList<>();
+        List<Map<String, Object>> contextOnlyUpdatedItems = new ArrayList<>();
         for (Map<String, Object> item : cleansedContentItems) {
             String sourcePath = (String) item.get("sourcePath");
             String itemType = (String) item.get("itemType");
             String contentHash = (String) item.get("contentHash");
-           // Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findBySourceUriAndContentHash(sourcePath, contentHash);
-
-           // if (existingCleansedData.isEmpty()) {
+            String contextHash = (String) item.get("contextHash");
 
             Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
 
             if (existingHashOpt.isPresent()) {
-                if (!existingHashOpt.get().getContentHash().equals(contentHash)) {
+                ContentHash existingHash = existingHashOpt.get();
+                if (!existingHash.getContentHash().equals(contentHash)) {
                     newOrUpdatedItems.add(item);
-                    ContentHash contentHashToUpdate = existingHashOpt.get();
-                    contentHashToUpdate.setContentHash(contentHash);
-                    contentHashRepository.save(contentHashToUpdate);
+                    existingHash.setContentHash(contentHash);
+                    existingHash.setContextHash(contextHash);
+                    contentHashRepository.save(existingHash);
+                } else if (!existingHash.getContextHash().equals(contextHash)) {
+                    contextOnlyUpdatedItems.add(item);
+                    contextUpdateService.updateContext(sourcePath, itemType, (Map<String, Object>) item.get("context"));
+                    existingHash.setContextHash(contextHash);
+                    contentHashRepository.save(existingHash);
                 }
             } else {
                 newOrUpdatedItems.add(item);
-                contentHashRepository.save(new ContentHash(sourcePath, itemType, contentHash));
+                contentHashRepository.save(new ContentHash(sourcePath, itemType, contentHash, contextHash));
             }
         }
 
-        if (newOrUpdatedItems.isEmpty()) {
+        if (newOrUpdatedItems.isEmpty() && contextOnlyUpdatedItems.isEmpty()) {
             logger.info("No new or updated content to process for raw_data_id: {}", associatedRawDataStore.getId());
             associatedRawDataStore.setStatus("PROCESSED_NO_CHANGES");
             rawDataStoreRepository.save(associatedRawDataStore);
-            // find and return existing cleansed data store
             return cleansedDataStoreRepository.findByRawDataId(associatedRawDataStore.getId()).orElse(null);
         }
 
@@ -370,14 +414,9 @@ public class DataIngestionService {
         cleansedDataStore.setCleansedAt(OffsetDateTime.now());
         cleansedDataStore.setCleansedItems(newOrUpdatedItems);
         cleansedDataStore.setVersion(associatedRawDataStore.getVersion());
-        try {
-            cleansedDataStore.setContentHash(calculateContentHash(objectMapper.writeValueAsString(newOrUpdatedItems), null));
-        } catch (JsonProcessingException e) {
-            logger.error("Error serializing cleansed items to calculate hash", e);
-        }
 
         // MODIFIED for context
-       // Map<String, Object> determinedContext = this.contextConfigService.getContext(null, sourceUriForDb);
+        // Map<String, Object> determinedContext = this.contextConfigService.getContext(null, sourceUriForDb);
         //cleansedDataStore.setContext(determinedContext);
         try {
             String contextJson = null;
@@ -399,8 +438,8 @@ public class DataIngestionService {
         }
 
         if (cleansingErrorsJson != null) {
-        cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
-    }
+            cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
+        }
 
         if (cleansingErrorsJson != null) {
             cleansedDataStore.setCleansingErrors(cleansingErrorsJson);
@@ -408,10 +447,12 @@ public class DataIngestionService {
 
         if ("EXTRACTION_ERROR".equals(associatedRawDataStore.getStatus())) {
             cleansedDataStore.setStatus("CLEANSING_FAILED");
-        } else if (newOrUpdatedItems.isEmpty())  {
+        } else if (newOrUpdatedItems.isEmpty() && contextOnlyUpdatedItems.isEmpty())  {
             logger.info("No content items extracted for raw_data_id: {}. Status set to 'NO_CONTENT_EXTRACTED'.", associatedRawDataStore.getId());
             cleansedDataStore.setStatus("NO_CONTENT_EXTRACTED");
             associatedRawDataStore.setStatus("PROCESSED_EMPTY_ITEMS");
+        } else if (newOrUpdatedItems.isEmpty()) {
+            cleansedDataStore.setStatus("CONTEXT_UPDATED_ONLY");
         } else {
             cleansedDataStore.setStatus("CLEANSED_PENDING_ENRICHMENT");
             associatedRawDataStore.setStatus("CLEANSING_COMPLETE");
@@ -506,14 +547,9 @@ public class DataIngestionService {
                         item.put("itemType", "copy");
                         item.put("originalFieldName", "copy");
                         item.put("cleansedContent", cleansed);
-                       // item.put("contentHash", calculateContentHash(cleansed, null));
-                        try {
-                            item.put("contentHash", calculateContentHash(cleansed, objectMapper.writeValueAsString(determinedContext)));
-                        } catch (JsonProcessingException e) {
-                            throw new RuntimeException(e);
-                        }
+                        item.put("contentHash", calculateContentHash(cleansed, null));
+                        item.put("contextHash", calculateContentHash(determinedContext.toString(), null));
                         if (currentModel != null) item.put("model", currentModel);
-                        // *** MODIFIED: Use 'context' as key ***
                         item.put("context", new HashMap<>(determinedContext));
                         results.add(item);
                         logger.debug("Extracted copy: {} with context: {}", item, determinedContext);
@@ -531,13 +567,9 @@ public class DataIngestionService {
                     item.put("itemType", "disclaimer");
                     item.put("originalFieldName", "disclaimer");
                     item.put("cleansedContent", cleansed);
-                    try {
-                        item.put("contentHash", calculateContentHash(cleansed, objectMapper.writeValueAsString(determinedContext)));
-                    } catch (JsonProcessingException e) {
-                        throw new RuntimeException(e);
-                    }
+                    item.put("contentHash", calculateContentHash(cleansed, null));
+                    item.put("contextHash", calculateContentHash(determinedContext.toString(), null));
                     if (currentModel != null) item.put("model", currentModel);
-                    // *** MODIFIED: Use 'context' as key ***
                     item.put("context", new HashMap<>(determinedContext));
                     results.add(item);
                     logger.debug("Extracted disclaimer: {} with context: {}", item, determinedContext);
@@ -600,11 +632,8 @@ public class DataIngestionService {
                         item.put("itemType", "analyticsAttribute");
                         item.put("originalFieldName", name);
                         item.put("cleansedContent", cleansedValue);
-                        try {
-                            item.put("contentHash", calculateContentHash(cleansedValue, objectMapper.writeValueAsString(itemContext)));
-                        } catch (JsonProcessingException e) {
-                            throw new RuntimeException(e);
-                        }
+                        item.put("contentHash", calculateContentHash(cleansedValue, null));
+                        item.put("contextHash", calculateContentHash(itemContext.toString(), null));
 
                         if (analyticsModel != null) {
                             item.put("model", analyticsModel);

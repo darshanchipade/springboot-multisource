@@ -67,8 +67,8 @@ public class CleansedDataStore {
     @Column(name = "version")
     private Integer version;
 
-    @Column(name = "content_hash")
-    private String contentHash;
+//    @Column(name = "content_hash")
+//    private String contentHash;
 
     public CleansedDataStore() {}
 
