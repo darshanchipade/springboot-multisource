@@ -363,7 +363,7 @@ public class DataIngestionService {
         try {
             JsonNode rootNode = objectMapper.readTree(rawJsonContent);
             findAndExtractRecursive(rootNode, "$", null, null, cleansedContentItems);
-            logger.info("Recursive parsing complete. Found {} processable items from raw data ID: {}", cleansedContentItems.size(), associatedRawDataStore.getId());
+            logger.debug("Recursive parsing complete. Found {} processable items from raw data ID: {}", cleansedContentItems.size(), associatedRawDataStore.getId());
             associatedRawDataStore.setStatus("PROCESSED_FOR_CLEANSING");
         } catch (Exception e) {
             logger.error("Error during parsing/extraction for raw data ID: {}. Error: {}", associatedRawDataStore.getId(), e.getMessage(), e);
