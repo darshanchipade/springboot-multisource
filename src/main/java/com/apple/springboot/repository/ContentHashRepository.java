@@ -10,4 +10,5 @@ import java.util.Optional;
 @Repository
 public interface ContentHashRepository extends JpaRepository<ContentHash, ContentHashId> {
     Optional<ContentHash> findBySourcePathAndItemType(String sourcePath, String itemType);
+  //  boolean existsBySourcePathAndItemTypeAndContentHash(String sourcePath, String itemType, String contentHash);
 }

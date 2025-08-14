@@ -68,6 +68,15 @@ public class ConsolidatedSectionService {
                 section.setCleansedText(item.getCleansedText());
                 contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
                         .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
+               // String hash = contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                //        .map(ContentHash::getContentHash)
+                //        .orElse(item.getContentHash()); // fallback to item-level hash
+
+                //if (hash != null) {
+                //    section.setContentHash(hash);
+               // } else {
+                //    logger.warn("No content hash found for item path '{}', field '{}'.", item.getItemSourcePath(), item.getItemOriginalFieldName());
+               // }
                 //section.setContentHash(item.getContentHash());
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());

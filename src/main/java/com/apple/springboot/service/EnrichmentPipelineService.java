@@ -208,7 +208,6 @@ public class EnrichmentPipelineService {
         enrichedElement.setContext(itemDetail.context != null ? new HashMap<>(itemDetail.context) : Collections.emptyMap());
 
         enrichedElement.setSummary((String) enrichmentResults.getOrDefault("summary", "Error: Missing summary"));
-
         Object keywordsObj = enrichmentResults.get("keywords");
         if (keywordsObj instanceof List) {
             try {
