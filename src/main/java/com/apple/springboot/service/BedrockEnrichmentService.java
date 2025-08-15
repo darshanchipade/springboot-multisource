@@ -1,6 +1,7 @@
 package com.apple.springboot.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,11 +21,9 @@ import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.BedrockRuntimeException;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
-
-
 import java.util.*;
-
 import java.util.Map;
+
 
 @Service
 public class BedrockEnrichmentService {
@@ -61,9 +60,40 @@ public class BedrockEnrichmentService {
         return this.bedrockModelId;
     }
 
-    public Map<String, Object> enrichText(String textToEnrich, String modelHint) {
-        String effectiveModelId = this.bedrockModelId;;
-        logger.info("Starting enrichment for text using model: {}. Text length: {}", effectiveModelId, textToEnrich.length());
+    private String createEnrichmentPrompt(JsonNode itemToEnrich) {
+        String cleansedContent = itemToEnrich.path("cleansedContent").asText("");
+        String sourcePath = itemToEnrich.path("sourcePath").asText("");
+
+        // Basic prompt template. This can be externalized or made more complex.
+        String promptTemplate =
+                "Human: You are an expert content analyst AI. Your task is to analyze a JSON object representing a piece of content and enrich it. Please provide a single, valid JSON object as your response with no extra commentary.\n" +
+                        "The response JSON should have two top-level keys: \"standardEnrichments\" and \"context\".\n" +
+                        "\n" +
+                        "1.  **standardEnrichments**: This object should contain the following based on the <cleansedContent>:\n" +
+                        "    -   'summary': A concise summary.\n" +
+                        "    -   'keywords': A JSON array of up to 10 relevant keywords.\n" +
+                        "    -   'sentiment': The overall sentiment (e.g., positive, negative, neutral).\n" +
+                        "    -   'classification': A general content category.\n" +
+                        "    -   'tags': A JSON array of up to 5 relevant tags.\n" +
+                        "\n" +
+                        "2.  **context**: This object must describe the content's placement and origin, derived *from the sourcePath and model fields*.\n" +
+                        "    -   'fullContextId': Generate a hierarchical ID by taking the last 3 non-uuid segments of the 'sourcePath', separated by colons. For example, if path is '/a/b/c/d/e', the ID should be 'c:d:e'.\n" +
+                        "    -   'sourcePath': The original 'sourcePath' of the item.\n" +
+                        "    -   'eventType': If the 'sourcePath' or other metadata suggests a holiday or event (e.g., 'mothers-day', 'valentines-day'), identify it here. Otherwise, null.\n" +
+                        "    -   'provenance': An object containing metadata about this enrichment process. It must include:\n" +
+                        "        -   'modelId': Use the value \"%s\".\n" +
+                        "        -   'promptId': Use the static value \"content-enrichment-v2\".\n\n" +
+                        "Here is the JSON object to analyze:\n" +
+                        "<item_json>\n%s\n</item_json>\n\n" +
+                        "Assistant: Here is the single, valid JSON object with the requested enrichments:\n";
+
+        return String.format(promptTemplate, this.bedrockModelId, itemToEnrich.toString());
+
+    }
+
+    public Map<String, Object> enrichItem(JsonNode itemToEnrich) {
+        String effectiveModelId = this.bedrockModelId;
+        logger.info("Starting enrichment for item using model: {}. Item path: {}", effectiveModelId, itemToEnrich.path("sourcePath").asText());
 
         Map<String, Object> results = new HashMap<>();
         results.put("enrichedWithModel", effectiveModelId);
@@ -74,15 +104,7 @@ public class BedrockEnrichmentService {
 
         while (retryCount < maxRetries) {
             try {
-                String prompt = "Human: You are an AI assistant. Analyze the following text and provide these details in a single, valid JSON object with no extra commentary before or after the JSON:\n" +
-                        "1. A concise summary (key: \"summary\").\n" +
-                        "2. A list of up to 10 relevant keywords (key: \"keywords\", value should be a JSON array of strings).\n" +
-                        "3. The overall sentiment (e.g., positive, negative, neutral) (key: \"sentiment\").\n" +
-                        "4. A content classification or category (key: \"classification\").\n" +
-                        "5. A list of up to 5 relevant tags (key: \"tags\", value should be a JSON array of strings).\n" +
-                        "Text to analyze is below:\n" +
-                        "<text>\n" + textToEnrich + "\n</text>\n\n" +
-                        "Assistant: Here is the JSON output as requested:\n";
+                String prompt = createEnrichmentPrompt(itemToEnrich);
 
                 ObjectNode payload = objectMapper.createObjectNode();
                 payload.put("anthropic_version", "bedrock-2023-05-31");
@@ -104,10 +126,10 @@ public class BedrockEnrichmentService {
                         .body(body)
                         .build();
 
-                logger.debug("Bedrock InvokeModel Request Body: {}", payloadJson);
+                logger.debug("Bedrock InvokeModel Request for path {}: {}", itemToEnrich.path("sourcePath").asText(), payloadJson);
                 InvokeModelResponse response = bedrockClient.invokeModel(request);
                 String responseBodyString = response.body().asUtf8String();
-                logger.debug("Bedrock InvokeModel Response Body: {}", responseBodyString);
+                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", itemToEnrich.path("sourcePath").asText(), responseBodyString);
 
                 JsonNode responseJson = objectMapper.readTree(responseBodyString);
                 JsonNode contentBlock = responseJson.path("content");
@@ -116,18 +138,13 @@ public class BedrockEnrichmentService {
                     String textContent = contentBlock.get(0).path("text").asText("");
                     if (textContent.startsWith("{") && textContent.endsWith("}")) {
                         try {
-                            JsonNode extractedJson = objectMapper.readTree(textContent);
-                            results.put("summary", extractedJson.path("summary").asText("Error parsing summary"));
-                            results.put("keywords", jsonNodeToList(extractedJson.path("keywords")));
-                            results.put("sentiment", extractedJson.path("sentiment").asText("Error parsing sentiment"));
-                            results.put("classification", extractedJson.path("classification").asText("Error parsing classification"));
-                            results.put("tags", jsonNodeToList(extractedJson.path("tags")));
-                            logger.info("Successfully parsed enrichments from Bedrock response for model: {}", effectiveModelId);
-                            return results;
+                            // The entire response is the result map
+                            return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
                         } catch (JsonProcessingException e) {
                             logger.error("Failed to parse JSON content from Bedrock response: {}. Error: {}", textContent, e.getMessage());
                             results.put("error", "Failed to parse JSON from Bedrock response");
                             results.put("raw_bedrock_response", textContent);
+                            return results;
                         }
                     } else {
                         logger.error("Bedrock response content is not a JSON object: {}", textContent);

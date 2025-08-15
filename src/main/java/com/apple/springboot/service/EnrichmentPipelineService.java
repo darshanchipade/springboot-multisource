@@ -5,30 +5,19 @@ import com.apple.springboot.model.EnrichedContentElement;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
-// import com.fasterxml.jackson.core.type.TypeReference; // Not strictly needed for this version
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-// import com.fasterxml.jackson.databind.JsonNode; // Not strictly needed for this version
-// import com.fasterxml.jackson.databind.node.ObjectNode; // Not strictly needed for this version
-//import io.github.resilience4j.ratelimiter.RateLimiter;
-//import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-// import java.io.IOException; // Not strictly needed for this version
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-/**
- * Service responsible for creating the enrichment pipeline.
- * It handles Bedrock enrichment, storing results in enriched_content_elements,
- * and then consolidates them into consolidated_enriched_sections for the data lake.
- */
 @Service
 public class EnrichmentPipelineService {
 
@@ -38,38 +27,40 @@ public class EnrichmentPipelineService {
     private final EnrichedContentElementRepository enrichedContentElementRepository;
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
-   // private final RateLimiter bedrockRateLimiter;
     private final ConsolidatedSectionService consolidatedSectionService;
 
+    private final AIResponseValidator aiResponseValidator;
+
     private static class CleansedItemDetail {
-        public String sourcePath;
-        public String originalFieldName;
-        public String cleansedContent;
-        public String model;
-        public Map<String, Object> context; // MODIFIED for context
-        public String contentHash;
+        public final String sourcePath;
+        public final String originalFieldName;
+        public final String cleansedContent;
+        public final String model;
+        public final String contentHash;
+
+        public CleansedItemDetail(String sourcePath, String originalFieldName, String cleansedContent, String model, String contentHash) {
+            this.sourcePath = sourcePath;
+            this.originalFieldName = originalFieldName;
+            this.cleansedContent = cleansedContent;
+            this.model = model;
+            this.contentHash = contentHash;
+        }
     }
 
     public EnrichmentPipelineService(BedrockEnrichmentService bedrockEnrichmentService,
                                      EnrichedContentElementRepository enrichedContentElementRepository,
                                      CleansedDataStoreRepository cleansedDataStoreRepository,
                                      ObjectMapper objectMapper,
-                                     ConsolidatedSectionService consolidatedSectionService) {
+                                     ConsolidatedSectionService consolidatedSectionService,
+                                     AIResponseValidator aiResponseValidator) {
         this.bedrockEnrichmentService = bedrockEnrichmentService;
         this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
         this.consolidatedSectionService = consolidatedSectionService;
+        this.aiResponseValidator = aiResponseValidator;
     }
 
-    /**
-     * Entry point to trigger the enrichment process for a given CleansedDataStore record.
-     * Applies text enrichment using AWS Bedrock for now, stores results in the database,
-     * and invokes section-level consolidation which is for the conslidated data which will be further used for the search interface.
-     *
-     * @param cleansedDataEntry the CleansedDataStore entity to enrich
-     * @throws JsonProcessingException if JSON processing fails
-     */
     @Transactional
     public void enrichAndStore(CleansedDataStore cleansedDataEntry) throws JsonProcessingException {
         if (cleansedDataEntry == null || cleansedDataEntry.getId() == null) {
@@ -89,23 +80,16 @@ public class EnrichmentPipelineService {
 
         cleansedDataEntry.setStatus("ENRICHMENT_IN_PROGRESS");
         cleansedDataStoreRepository.save(cleansedDataEntry);
-        //consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry); // Ensured this is uncommented
 
-        List<CleansedItemDetail> itemsToEnrich;
         List<Map<String, Object>> maps = cleansedDataEntry.getCleansedItems();
         if (maps == null || maps.isEmpty()) {
             logger.info("No items found in cleansed_items for CleansedDataStore ID: {}. Marking as ENRICHED_NO_ITEMS_TO_PROCESS.", cleansedDataStoreId);
-            itemsToEnrich = Collections.emptyList();
-        } else {
-            itemsToEnrich = convertMapsToCleansedItemDetails(maps);
-        }
-
-        if (itemsToEnrich.isEmpty()) {
-            logger.info("No actual items to process after deserialization/conversion for CleansedDataStore ID: {}. Marking as ENRICHED_NO_ITEMS_TO_PROCESS.", cleansedDataStoreId);
             cleansedDataEntry.setStatus("ENRICHED_NO_ITEMS_TO_PROCESS");
             cleansedDataStoreRepository.save(cleansedDataEntry);
             return;
         }
+
+        List<CleansedItemDetail> itemsToEnrich = convertMapsToCleansedItemDetails(maps);
 
         logger.info("Found {} items to enrich for CleansedDataStore ID: {}", itemsToEnrich.size(), cleansedDataStoreId);
         AtomicInteger successCount = new AtomicInteger(0);
@@ -118,21 +102,23 @@ public class EnrichmentPipelineService {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
                 continue;
             }
-//            Optional<EnrichedContentElement> existingEnrichedElement = enrichedContentElementRepository.findByItemSourcePathAndContentHash(itemDetail.sourcePath, itemDetail.contentHash);
-//            if (existingEnrichedElement.isPresent()) {
-//                logger.info("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) as it has already been enriched.", cleansedDataStoreId, itemDetail.sourcePath);
-//                continue;
-//            }
+
             try {
-                //Map<String, Object> enrichmentResultsFromBedrock = bedrockRateLimiter.executeSupplier(
-                //        () -> bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model)
-                //);
-                //Thread.sleep(1000);
-                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichText(itemDetail.cleansedContent, itemDetail.model);
+                JsonNode itemAsJson = objectMapper.valueToTree(itemDetail);
+                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichItem(itemAsJson);
+
+                if (enrichmentResultsFromBedrock.containsKey("error")) {
+                    throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
+                }
+
+                if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
+                    throw new RuntimeException("Validation failed for AI response structure. Check logs for details.");
+                }
+
                 saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
                 successCount.incrementAndGet();
             } catch (RequestNotPermitted rnp) {
-                logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataStoreId, itemDetail.sourcePath);
+                logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataStoreId, itemDetail.sourcePath, rnp);
                 skippedByRateLimitCount.incrementAndGet();
                 itemProcessingErrors.add(String.format("Item '%s': Rate limited - %s", itemDetail.sourcePath, rnp.getMessage()));
             } catch (Exception e) {
@@ -145,55 +131,28 @@ public class EnrichmentPipelineService {
         updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
     }
 
-    // Converts from the Map structure produced by DataIngestionService to CleansedItemDetail DTO
-    /**
-     * Converts a list of raw map entries from cleansed_items into structured CleansedItemDetail DTOs.
-     *
-     * @param maps list of raw maps from CleansedDataStore.cleansedItems
-     * @return list of structured CleansedItemDetail objects
-     */
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {
-        if (maps == null) return Collections.emptyList();
-        List<CleansedItemDetail> details = new ArrayList<>();
-        for (Map<String, Object> map : maps) {
-            CleansedItemDetail detail = new CleansedItemDetail();
-            detail.sourcePath = map.get("sourcePath") != null ? map.get("sourcePath").toString() : null;
-            detail.originalFieldName = map.get("originalFieldName") != null ? map.get("originalFieldName").toString() : null;
-            detail.cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
-            detail.model = map.get("model") != null ? map.get("model").toString() : null;
-            detail.contentHash = map.get("contentHash") != null ? map.get("contentHash").toString() : null;
+        return maps.stream()
+                .map(map -> {
+                    String sourcePath = map.get("sourcePath") != null ? map.get("sourcePath").toString() : null;
+                    String originalFieldName = map.get("originalFieldName") != null ? map.get("originalFieldName").toString() : null;
+                    String cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
+                    String model = map.get("model") != null ? map.get("model").toString() : null;
+                    String contentHash = map.get("contentHash") != null ? map.get("contentHash").toString() : null;
 
-            // *** MODIFIED: Read "context" key ***
-            if (map.containsKey("context") && map.get("context") instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> contextMap = (Map<String, Object>) map.get("context");
-                detail.context = contextMap;
-            } else {
-                detail.context = Collections.emptyMap();
-                logger.warn("Context missing or not a Map for item: {}. Using empty context.", detail.sourcePath);
-            }
-
-            if (detail.sourcePath != null && detail.originalFieldName != null && detail.cleansedContent != null) {
-                details.add(detail);
-            } else {
-                logger.warn("Skipping map in convertMapsToCleansedItemDetails due to missing essential fields (sourcePath, originalFieldName, or cleansedContent): {}", map);
-            }
-        }
-        return details;
+                    if (sourcePath != null && originalFieldName != null && cleansedContent != null) {
+                        return new CleansedItemDetail(sourcePath, originalFieldName, cleansedContent, model, contentHash);
+                    } else {
+                        logger.warn("Skipping map in convertMapsToCleansedItemDetails due to missing essential fields: {}", map);
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
-
-    /**
-     * Persists one enriched content element into enriched_content_elements table.
-     * Extracts structured fields like keywords, tags, and stores enrichment metadata.
-     *
-     * @param itemDetail cleansed content item being enriched
-     * @param parentEntry parent CleansedDataStore record
-     * @param enrichmentResults enrichment results returned from Bedrock
-     * @param elementStatus status to assign to this enriched element (e.g "ENRICHED")
-     */
     private void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
-                                     Map<String, Object> enrichmentResults, String elementStatus) {
+                                     Map<String, Object> bedrockResponse, String elementStatus) {
         EnrichedContentElement enrichedElement = new EnrichedContentElement();
         enrichedElement.setCleansedDataId(parentEntry.getId());
         enrichedElement.setVersion(parentEntry.getVersion());
@@ -202,56 +161,34 @@ public class EnrichmentPipelineService {
         enrichedElement.setItemOriginalFieldName(itemDetail.originalFieldName);
         enrichedElement.setItemModelHint(itemDetail.model);
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
-        //enrichedElement.setContentHash(itemDetail.contentHash);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
-        // *** MODIFIED: Use setContext and ensure itemDetail.context is handled if null ***
-        enrichedElement.setContext(itemDetail.context != null ? new HashMap<>(itemDetail.context) : Collections.emptyMap());
 
-        enrichedElement.setSummary((String) enrichmentResults.getOrDefault("summary", "Error: Missing summary"));
-        Object keywordsObj = enrichmentResults.get("keywords");
-        if (keywordsObj instanceof List) {
-            try {
-                @SuppressWarnings("unchecked")
-                List<String> keywordsList = (List<String>) keywordsObj;
-                enrichedElement.setKeywords(keywordsList.toArray(new String[0]));
-            } catch (ClassCastException e) {
-                logger.warn("Could not cast keywords to List<String> for item path: {}. Keywords: {}", itemDetail.sourcePath, keywordsObj, e);
-                enrichedElement.setKeywords(new String[]{"Error: Keywords format unexpected"});
-            }
-        } else {
-            logger.warn("Keywords field was not a List for item path: {}. Received: {}", itemDetail.sourcePath, keywordsObj != null ? keywordsObj.getClass().getName() : "null");
-            enrichedElement.setKeywords(new String[0]);
-        }
+        // Extract the nested objects from the Bedrock response
+        @SuppressWarnings("unchecked")
+        Map<String, Object> standardEnrichments = (Map<String, Object>) bedrockResponse.getOrDefault("standardEnrichments", Collections.emptyMap());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> context = (Map<String, Object>) bedrockResponse.getOrDefault("context", Collections.emptyMap());
 
-        enrichedElement.setSentiment((String) enrichmentResults.getOrDefault("sentiment", "Error: Missing sentiment"));
-        enrichedElement.setClassification((String) enrichmentResults.getOrDefault("classification", "Error: Missing classification"));
+        enrichedElement.setContext(context);
 
-        Object tagsObj = enrichmentResults.get("tags");
-        if (tagsObj instanceof List) {
-            try {
-                @SuppressWarnings("unchecked")
-                List<String> tagsList = (List<String>) tagsObj;
-                enrichedElement.setTags(tagsList.toArray(new String[0]));
-            } catch (ClassCastException e) {
-                logger.warn("Could not cast tags to List<String> for item path: {}. Tags: {}", itemDetail.sourcePath, tagsObj, e);
-                enrichedElement.setTags(new String[]{"Error: Tags format unexpected"});
-            }
-        } else {
-            logger.warn("Tags field was not a List for item path: {}. Received: {}", itemDetail.sourcePath, tagsObj != null ? tagsObj.getClass().getName() : "null");
-            enrichedElement.setTags(new String[0]);
-        }
+        enrichedElement.setSummary((String) standardEnrichments.getOrDefault("summary", "Error: Missing summary"));
+        enrichedElement.setSentiment((String) standardEnrichments.getOrDefault("sentiment", "Error: Missing sentiment"));
+        enrichedElement.setClassification((String) standardEnrichments.getOrDefault("classification", "Error: Missing classification"));
 
-        enrichedElement.setBedrockModelUsed((String) enrichmentResults.getOrDefault("enrichedWithModel", bedrockEnrichmentService.getConfiguredModelId()));
+        enrichedElement.setKeywords(extractList(standardEnrichments, "keywords", itemDetail.sourcePath).toArray(new String[0]));
+        enrichedElement.setTags(extractList(standardEnrichments, "tags", itemDetail.sourcePath).toArray(new String[0]));
 
-        Map<String, Object> bedrockMeta = new HashMap<>(enrichmentResults);
-        bedrockMeta.remove("summary");
-        bedrockMeta.remove("keywords");
-        bedrockMeta.remove("sentiment");
-        bedrockMeta.remove("classification");
-        bedrockMeta.remove("tags");
-        bedrockMeta.remove("enrichedWithModel");
-        if (enrichmentResults.containsKey("error")) {
-            bedrockMeta.put("bedrockItemProcessingError", enrichmentResults.get("error"));
+        // Provenance is now inside the context map
+        @SuppressWarnings("unchecked")
+        Map<String, Object> provenance = (Map<String, Object>) context.getOrDefault("provenance", Collections.emptyMap());
+        enrichedElement.setBedrockModelUsed((String) provenance.getOrDefault("modelId", bedrockEnrichmentService.getConfiguredModelId()));
+
+        // Store any other non-standard fields in the metadata column
+        Map<String, Object> bedrockMeta = new HashMap<>(bedrockResponse);
+        bedrockMeta.remove("standardEnrichments");
+        bedrockMeta.remove("context");
+        if (bedrockResponse.containsKey("error")) {
+            bedrockMeta.put("bedrockItemProcessingError", bedrockResponse.get("error"));
         }
 
         if (!bedrockMeta.isEmpty()) {
@@ -264,6 +201,21 @@ public class EnrichmentPipelineService {
         }
         enrichedElement.setStatus(elementStatus);
         enrichedContentElementRepository.save(enrichedElement);
+    }
+
+    private List<String> extractList(Map<String, Object> map, String key, String sourcePath) {
+        Object obj = map.get(key);
+        if (obj instanceof List) {
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) obj;
+                return list;
+            } catch (ClassCastException e) {
+                logger.warn("Could not cast {} to List<String> for item path: {}. Value: {}", key, sourcePath, obj, e);
+            }
+        }
+        logger.warn("{} field was not a List for item path: {}. Received: {}", key, sourcePath, obj != null ? obj.getClass().getName() : "null");
+        return Collections.emptyList();
     }
 
 
