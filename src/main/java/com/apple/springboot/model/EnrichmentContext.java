@@ -1,3 +1,4 @@
+
 package com.apple.springboot.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;

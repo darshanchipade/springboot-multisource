@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.*;
+import org.hibernate.type.SqlTypes;
 import software.amazon.awssdk.services.s3.endpoints.internal.Value;
 
 import javax.persistence.*;
@@ -41,17 +42,20 @@ public class CleansedDataStore {
     @Column(name = "source_uri", nullable = false, columnDefinition = "TEXT")
     private String sourceUri;
 
-    @Type(type = "jsonb")
+   // @Type(type = "jsonb")
+   @JdbcTypeCode(SqlTypes.JSON)
     //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "cleansed_items", nullable = false, columnDefinition = "jsonb")
     //private String cleansedItems;
     private List<Map<String, Object>> cleansedItems;
 
-    @Type(type = "jsonb")
+   // @Type(type = "jsonb")
+   @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;
 
-    @Type(type = "jsonb")
+    //@Type(type = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
     //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "cleansing_errors", columnDefinition = "jsonb")
     private Map<String, Object> cleansingErrors;

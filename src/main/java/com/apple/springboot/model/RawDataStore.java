@@ -5,7 +5,9 @@ import javax.persistence.*;
 import lombok.Getter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.Type;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -35,7 +37,8 @@ public class RawDataStore {
     @Column(name = "raw_content_binary", columnDefinition = "bytea")
     private byte[] rawContentBinary;
 
-    @Type(type = "jsonb")
+    //@Type(type = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "source_metadata", columnDefinition = "jsonb")
     private String sourceMetadata; // Store as JSON string
 

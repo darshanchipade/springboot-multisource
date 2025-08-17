@@ -545,20 +545,20 @@ public class DataIngestionService {
             }
 
             // If not an enrichable model, recurse into children
-            currentNode.fields().forEachRemaining(entry -> {
-                String fieldKey = entry.getKey();
-                JsonNode fieldValue = entry.getValue();
-                String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
-                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
-            });
-//            Iterator<Map.Entry<String, JsonNode>> it = currentNode.fields();
-//            while (it.hasNext()) {
-//                Map.Entry<String, JsonNode> entry = it.next();
+//            currentNode.fields().forEachRemaining(entry -> {
 //                String fieldKey = entry.getKey();
 //                JsonNode fieldValue = entry.getValue();
-//                String newJsonPath = "$".equals(currentJsonPath) ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+//                String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
 //                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
-//            }
+//            });
+            Iterator<Map.Entry<String, JsonNode>> it = currentNode.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> entry = it.next();
+                String fieldKey = entry.getKey();
+                JsonNode fieldValue = entry.getValue();
+                String newJsonPath = "$".equals(currentJsonPath) ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
+            }
         } else if (currentNode.isArray()) {
             for (int i = 0; i < currentNode.size(); i++) {
                 String newJsonPath = currentJsonPath + "[" + i + "]";

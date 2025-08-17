@@ -2,7 +2,9 @@ package com.apple.springboot.model;
 
 import lombok.*;
 import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.Type;
+import org.hibernate.type.SqlTypes;
 
 import javax.persistence.*;
 import java.time.OffsetDateTime;
@@ -31,7 +33,8 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "original_field_name")
     private String originalFieldName;
 
-    @Type(type = "jsonb")
+   // @Type(type = "jsonb")
+   @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "enrichment_metadata", columnDefinition = "jsonb")
     private String enrichmentMetadata;
 
@@ -68,7 +71,8 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "model_used")
     private String modelUsed;
 
-    @Type(type = "jsonb")
+    //@Type(type = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;
 

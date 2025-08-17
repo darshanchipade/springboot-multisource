@@ -9,7 +9,9 @@ import java.util.Map;
 
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.Type;
+import org.hibernate.type.SqlTypes;
 //import org.hibernate.annotations.JdbcTypeCode;
 //import org.hibernate.type.SqlTypes;
 
@@ -42,7 +44,8 @@ public class EnrichedContentElement {
     @Column(name = "cleansed_text", columnDefinition = "TEXT")
     private String cleansedText;
 
-    @Type(type = "jsonb")
+    //@Type(type = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;
 
@@ -69,8 +72,10 @@ public class EnrichedContentElement {
     private String bedrockModelUsed;
 
    // @JdbcTypeCode(SqlTypes.JSON)
-   @Type(type = "jsonb")
-   //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
+
+    //@Type(type = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "enrichment_metadata", columnDefinition = "jsonb")
     private String enrichmentMetadata; // Store as String, expecting JSON formatted string
 
