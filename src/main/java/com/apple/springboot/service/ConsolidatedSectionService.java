@@ -68,15 +68,15 @@ public class ConsolidatedSectionService {
                 section.setCleansedText(item.getCleansedText());
                 contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
                         .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
-               // String hash = contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                // String hash = contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
                 //        .map(ContentHash::getContentHash)
                 //        .orElse(item.getContentHash()); // fallback to item-level hash
 
                 //if (hash != null) {
                 //    section.setContentHash(hash);
-               // } else {
+                // } else {
                 //    logger.warn("No content hash found for item path '{}', field '{}'.", item.getItemSourcePath(), item.getItemOriginalFieldName());
-               // }
+                // }
                 //section.setContentHash(item.getContentHash());
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());
@@ -89,6 +89,9 @@ public class ConsolidatedSectionService {
                 section.setSectionUri(item.getItemSourcePath()); // Often same as itemSourcePath for sections
                 //MODIFIED: Use getContext and setContext ***
                 section.setContext(item.getContext());
+                if (item.getContext() != null && !item.getContext().isEmpty()) {
+                    logger.info("Consolidating context for {}: {}", item.getItemSourcePath(), item.getContext());
+                }
                 section.setSavedAt(OffsetDateTime.now());
                 section.setStatus(item.getStatus());
 

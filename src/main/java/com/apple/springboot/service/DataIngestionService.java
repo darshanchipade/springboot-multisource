@@ -1,8 +1,6 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.model.CleansedDataStore;
-import com.apple.springboot.model.ContentHash;
-import com.apple.springboot.model.RawDataStore;
+import com.apple.springboot.model.*;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.ContentHashRepository;
 import com.apple.springboot.repository.RawDataStoreRepository;
@@ -41,6 +39,7 @@ public class DataIngestionService {
     private final String defaultS3BucketName;
     private final ContentHashRepository contentHashRepository;
     private final ContextUpdateService contextUpdateService;
+    private final Set<String> enrichableModels;
 
     /**
      * Constructs the service with required repositories and config values.
@@ -63,6 +62,7 @@ public class DataIngestionService {
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
+        this.enrichableModels = new HashSet<>(Arrays.asList("markdown-inline-copy"));
     }
 
 
@@ -335,7 +335,7 @@ public class DataIngestionService {
 
         try {
             JsonNode rootNode = objectMapper.readTree(rawJsonContent);
-            findAndExtractRecursive(rootNode, "$", null, null, cleansedContentItems, new ArrayList<>());
+            findAndExtractRecursive(rootNode, "$", new Envelope(), new Facets(), cleansedContentItems);
             logger.debug("Recursive parsing complete. Found {} processable items from raw data ID: {}", cleansedContentItems.size(), associatedRawDataStore.getId());
             associatedRawDataStore.setStatus("PROCESSED_FOR_CLEANSING");
         } catch (Exception e) {
@@ -469,139 +469,100 @@ public class DataIngestionService {
         return errorMap;
     }
 
-    /**
-     * Recursively traverses JSON to extract "copy", "disclaimer", and "analyticsAttributes".
-     * Applies context to each extractable field.
-     */
     private void findAndExtractRecursive(JsonNode currentNode,
                                          String currentJsonPath,
-                                         String inheritedModel,
-                                         String inheritedSourcePath,
-                                         List<Map<String, Object>> results,
-                                         List<String> pathContext) {
+                                         Envelope parentEnvelope,
+                                         Facets parentFacets,
+                                         List<Map<String, Object>> results) {
         if (currentNode.isObject()) {
-            String currentModel = currentNode.path("_model").asText(inheritedModel);
-            String currentSourcePath = currentNode.path("_path").asText(inheritedSourcePath);
+            Envelope currentEnvelope = new Envelope();
+            if (parentEnvelope != null) {
+                currentEnvelope = objectMapper.convertValue(objectMapper.convertValue(parentEnvelope, Map.class), Envelope.class);
+            }
 
-            List<String> newPathContext = new ArrayList<>(pathContext);
-            if (currentSourcePath != null && !currentSourcePath.equals(inheritedSourcePath)) {
+            Facets currentFacets = new Facets();
+            if (parentFacets != null) {
+                currentFacets.putAll(parentFacets);
+            }
+
+            // Populate current context from the node's fields
+            currentNode.fields().forEachRemaining(entry -> {
+                String key = entry.getKey();
+                JsonNode value = entry.getValue();
+                if (value.isValueNode() && !key.startsWith("_")) {
+                    currentFacets.put(key, value.asText());
+                }
+            });
+
+            String currentModel = currentNode.path("_model").asText(parentEnvelope != null ? parentEnvelope.getModel() : null);
+            currentEnvelope.setModel(currentModel);
+
+            String currentSourcePath = currentNode.path("_path").asText(parentEnvelope != null ? parentEnvelope.getSourcePath() : null);
+            currentEnvelope.setSourcePath(currentSourcePath);
+
+            // Logic to build pathHierarchy
+            List<String> pathHierarchy = new ArrayList<>(parentEnvelope.getPathHierarchy() != null ? parentEnvelope.getPathHierarchy() : Collections.emptyList());
+            if (currentSourcePath != null && !currentSourcePath.equals(parentEnvelope.getSourcePath())) {
                 String[] segments = currentSourcePath.split("/");
                 if (segments.length > 0) {
                     String lastSegment = segments[segments.length - 1];
                     if (!lastSegment.isEmpty()) {
-                        newPathContext.add(lastSegment);
+                        pathHierarchy.add(lastSegment);
                     }
                 }
             }
+            currentEnvelope.setPathHierarchy(pathHierarchy);
 
-            JsonNode copyNode = currentNode.get("copy");
-            if (copyNode != null && copyNode.isTextual()) {
-                String copyText = copyNode.asText();
-                if (!copyText.isBlank()) {
-                    String cleansed = cleanseCopyText(copyText);
-                    if (!cleansed.isBlank()) {
-                        Map<String, Object> item = new HashMap<>();
-                        item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
-                        item.put("itemType", "copy");
-                        item.put("originalFieldName", "copy");
-                        item.put("cleansedContent", cleansed);
-                        item.put("contentHash", calculateContentHash(cleansed, null));
 
-                        Map<String, Object> determinedContext = new HashMap<>();
-                        determinedContext.put("pathHierarchy", newPathContext);
-                        item.put("context", determinedContext);
-                        item.put("contextHash", calculateContentHash(determinedContext.toString(), null));
+            // Check if the current model is in our enrichable list
+            if (enrichableModels.contains(currentModel)) {
+                JsonNode copyNode = currentNode.get("copy");
+                if (copyNode != null && copyNode.isTextual()) {
+                    String copyText = copyNode.asText();
+                    if (!copyText.isBlank()) {
+                        String cleansed = cleanseCopyText(copyText);
+                        if (!cleansed.isBlank()) {
+                            EnrichmentContext finalContext = new EnrichmentContext();
+                            finalContext.setEnvelope(currentEnvelope);
+                            finalContext.setFacets(currentFacets);
 
-                        if (currentModel != null) item.put("model", currentModel);
-                        results.add(item);
-                        logger.debug("Extracted copy: {} with context: {}", item, determinedContext);
+                            Map<String, Object> item = new HashMap<>();
+                            item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
+                            item.put("itemType", "copy");
+                            item.put("originalFieldName", "copy");
+                            item.put("cleansedContent", cleansed);
+                            item.put("contentHash", calculateContentHash(cleansed, null));
+                            item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+                            item.put("contextHash", calculateContentHash(objectMapper.convertValue(finalContext, JsonNode.class).toString(), null));
+                            if (currentModel != null) item.put("model", currentModel);
+                            results.add(item);
+                            logger.debug("Extracted enrichable item: {}", item);
+                        }
                     }
                 }
+                // Stop recursing further down this branch once we've extracted content
+                return;
             }
 
-            JsonNode disclaimerNode = currentNode.get("disclaimer");
-            if (disclaimerNode != null && disclaimerNode.isTextual()) {
-                String disclaimerText = disclaimerNode.asText();
-                String cleansed = cleanseCopyText(disclaimerText);
-                if (!cleansed.isBlank()) {
-                    Map<String, Object> item = new HashMap<>();
-                    item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".disclaimer");
-                    item.put("itemType", "disclaimer");
-                    item.put("originalFieldName", "disclaimer");
-                    item.put("cleansedContent", cleansed);
-                    item.put("contentHash", calculateContentHash(cleansed, null));
-
-                    Map<String, Object> determinedContext = new HashMap<>();
-                    determinedContext.put("pathHierarchy", newPathContext);
-                    item.put("context", determinedContext);
-                    item.put("contextHash", calculateContentHash(determinedContext.toString(), null));
-
-                    if (currentModel != null) item.put("model", currentModel);
-                    results.add(item);
-                    logger.debug("Extracted disclaimer: {} with context: {}", item, determinedContext);
-                }
-            }
-
-            currentNode.fields().forEachRemaining(entry -> {
-                String key = entry.getKey();
-                JsonNode value = entry.getValue();
-                if (key.toLowerCase().endsWith("analyticsattributes") && value.isArray()) {
-                    logger.debug("Processing analytics array: {} at path: {}", key, currentJsonPath);
-                    processAnalyticsAttributes(value, currentModel, currentSourcePath != null ? currentSourcePath : currentJsonPath, results, newPathContext);
-                }
-            });
-
+            // If not an enrichable model, recurse into children
             currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
                 JsonNode fieldValue = entry.getValue();
-                if (!Set.of("_model", "_path", "copy", "disclaimer", "analyticsAttributes").contains(fieldKey)) {
-                    String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
-                    findAndExtractRecursive(fieldValue, newJsonPath, currentModel, currentSourcePath, results, newPathContext);
-                }
+                String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
             });
-
+//            Iterator<Map.Entry<String, JsonNode>> it = currentNode.fields();
+//            while (it.hasNext()) {
+//                Map.Entry<String, JsonNode> entry = it.next();
+//                String fieldKey = entry.getKey();
+//                JsonNode fieldValue = entry.getValue();
+//                String newJsonPath = "$".equals(currentJsonPath) ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+//                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
+//            }
         } else if (currentNode.isArray()) {
             for (int i = 0; i < currentNode.size(); i++) {
                 String newJsonPath = currentJsonPath + "[" + i + "]";
-                findAndExtractRecursive(currentNode.get(i), newJsonPath, inheritedModel, inheritedSourcePath, results, pathContext);
-            }
-        }
-    }
-
-    private void processAnalyticsAttributes(JsonNode analyticsArray,
-                                            String parentModelHint,
-                                            String parentPathHint,
-                                            List<Map<String, Object>> results,
-                                            List<String> pathContext) {
-        for (JsonNode element : analyticsArray) {
-            if (element.isObject()) {
-                String analyticsPath = element.path("_path").asText(parentPathHint);
-                String analyticsModel = element.path("_model").asText(parentModelHint);
-                String name = element.path("name").asText(null);
-                String value = element.path("value").asText(null);
-
-                Map<String, Object> itemContext = new HashMap<>();
-                itemContext.put("pathHierarchy", pathContext);
-
-                if (analyticsPath != null && name != null && value != null && !value.isBlank()) {
-                    String cleansedValue = value.trim();
-                    if (!cleansedValue.isBlank()) {
-                        Map<String, Object> item = new HashMap<>();
-                        item.put("sourcePath", analyticsPath);
-                        item.put("itemType", "analyticsAttribute");
-                        item.put("originalFieldName", name);
-                        item.put("cleansedContent", cleansedValue);
-                        item.put("contentHash", calculateContentHash(cleansedValue, null));
-                        item.put("contextHash", calculateContentHash(itemContext.toString(), null));
-                        item.put("context", itemContext);
-
-                        if (analyticsModel != null) {
-                            item.put("model", analyticsModel);
-                        }
-                        results.add(item);
-                        logger.debug("Extracted analytics attribute: {} with context: {}", item, itemContext);
-                    }
-                }
+                findAndExtractRecursive(currentNode.get(i), newJsonPath, parentEnvelope, parentFacets, results);
             }
         }
     }

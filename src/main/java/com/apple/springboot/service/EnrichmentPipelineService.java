@@ -1,7 +1,6 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.model.CleansedDataStore;
-import com.apple.springboot.model.EnrichedContentElement;
+import com.apple.springboot.model.*;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -37,13 +36,15 @@ public class EnrichmentPipelineService {
         public final String cleansedContent;
         public final String model;
         public final String contentHash;
+        public final EnrichmentContext context;
 
-        public CleansedItemDetail(String sourcePath, String originalFieldName, String cleansedContent, String model, String contentHash) {
+        public CleansedItemDetail(String sourcePath, String originalFieldName, String cleansedContent, String model, String contentHash, EnrichmentContext context) {
             this.sourcePath = sourcePath;
             this.originalFieldName = originalFieldName;
             this.cleansedContent = cleansedContent;
             this.model = model;
             this.contentHash = contentHash;
+            this.context = context;
         }
     }
 
@@ -104,8 +105,13 @@ public class EnrichmentPipelineService {
             }
 
             try {
-                JsonNode itemAsJson = objectMapper.valueToTree(itemDetail);
-                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichItem(itemAsJson);
+                // We only need a small part of the itemDetail for the prompt, not the whole thing.
+                // Let's create a simple map for that.
+                Map<String, String> itemContent = new HashMap<>();
+                itemContent.put("cleansedContent", itemDetail.cleansedContent);
+
+                JsonNode itemContentAsJson = objectMapper.valueToTree(itemContent);
+                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichItem(itemContentAsJson, itemDetail.context);
 
                 if (enrichmentResultsFromBedrock.containsKey("error")) {
                     throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
@@ -139,9 +145,18 @@ public class EnrichmentPipelineService {
                     String cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
                     String model = map.get("model") != null ? map.get("model").toString() : null;
                     String contentHash = map.get("contentHash") != null ? map.get("contentHash").toString() : null;
+                    EnrichmentContext context = null;
+                    if (map.containsKey("context")) {
+                        try {
+                            context = objectMapper.convertValue(map.get("context"), EnrichmentContext.class);
+                        } catch (IllegalArgumentException e) {
+                            logger.warn("Could not convert context map to EnrichmentContext object for sourcePath: {}", sourcePath, e);
+                        }
+                    }
+
 
                     if (sourcePath != null && originalFieldName != null && cleansedContent != null) {
-                        return new CleansedItemDetail(sourcePath, originalFieldName, cleansedContent, model, contentHash);
+                        return new CleansedItemDetail(sourcePath, originalFieldName, cleansedContent, model, contentHash, context);
                     } else {
                         logger.warn("Skipping map in convertMapsToCleansedItemDetails due to missing essential fields: {}", map);
                         return null;
@@ -163,13 +178,19 @@ public class EnrichmentPipelineService {
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
 
-        // Extract the nested objects from the Bedrock response
-        @SuppressWarnings("unchecked")
-        Map<String, Object> standardEnrichments = (Map<String, Object>) bedrockResponse.getOrDefault("standardEnrichments", Collections.emptyMap());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> context = (Map<String, Object>) bedrockResponse.getOrDefault("context", Collections.emptyMap());
+        // The context now comes from the itemDetail, not the Bedrock response.
+        if (itemDetail.context != null) {
+            Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            enrichedElement.setContext(contextMap);
+            logger.info("Saving context for {}: {}", itemDetail.sourcePath, contextMap);
+        } else {
+            enrichedElement.setContext(new HashMap<>());
+        }
 
-        enrichedElement.setContext(context);
+        // The bedrock response might still have a standardEnrichments wrapper
+        @SuppressWarnings("unchecked")
+        Map<String, Object> standardEnrichments = (Map<String, Object>) bedrockResponse.getOrDefault("standardEnrichments", bedrockResponse);
+
 
         enrichedElement.setSummary((String) standardEnrichments.getOrDefault("summary", "Error: Missing summary"));
         enrichedElement.setSentiment((String) standardEnrichments.getOrDefault("sentiment", "Error: Missing sentiment"));
@@ -179,9 +200,7 @@ public class EnrichmentPipelineService {
         enrichedElement.setTags(extractList(standardEnrichments, "tags", itemDetail.sourcePath).toArray(new String[0]));
 
         // Provenance is now inside the context map
-        @SuppressWarnings("unchecked")
-        Map<String, Object> provenance = (Map<String, Object>) context.getOrDefault("provenance", Collections.emptyMap());
-        enrichedElement.setBedrockModelUsed((String) provenance.getOrDefault("modelId", bedrockEnrichmentService.getConfiguredModelId()));
+        enrichedElement.setBedrockModelUsed((String) bedrockResponse.getOrDefault("enrichedWithModel", bedrockEnrichmentService.getConfiguredModelId()));
 
         // Store any other non-standard fields in the metadata column
         Map<String, Object> bedrockMeta = new HashMap<>(bedrockResponse);

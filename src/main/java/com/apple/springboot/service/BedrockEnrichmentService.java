@@ -1,5 +1,6 @@
 package com.apple.springboot.service;
 
+import com.apple.springboot.model.EnrichmentContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -60,40 +61,35 @@ public class BedrockEnrichmentService {
         return this.bedrockModelId;
     }
 
-    private String createEnrichmentPrompt(JsonNode itemToEnrich) {
-        String cleansedContent = itemToEnrich.path("cleansedContent").asText("");
-        String sourcePath = itemToEnrich.path("sourcePath").asText("");
+    private String createEnrichmentPrompt(JsonNode itemContent, EnrichmentContext context) throws JsonProcessingException {
+        String cleansedContent = itemContent.path("cleansedContent").asText("");
+        String contextJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(context);
 
-        // Basic prompt template. This can be externalized or made more complex.
+        // New, more detailed prompt template
         String promptTemplate =
-                "Human: You are an expert content analyst AI. Your task is to analyze a JSON object representing a piece of content and enrich it. Please provide a single, valid JSON object as your response with no extra commentary.\n" +
-                        "The response JSON should have two top-level keys: \"standardEnrichments\" and \"context\".\n" +
-                        "\n" +
-                        "1.  **standardEnrichments**: This object should contain the following based on the <cleansedContent>:\n" +
-                        "    -   'summary': A concise summary.\n" +
-                        "    -   'keywords': A JSON array of up to 10 relevant keywords.\n" +
-                        "    -   'sentiment': The overall sentiment (e.g., positive, negative, neutral).\n" +
-                        "    -   'classification': A general content category.\n" +
-                        "    -   'tags': A JSON array of up to 5 relevant tags.\n" +
-                        "\n" +
-                        "2.  **context**: This object must describe the content's placement and origin, derived *from the sourcePath and model fields*.\n" +
-                        "    -   'fullContextId': Generate a hierarchical ID by taking the last 3 non-uuid segments of the 'sourcePath', separated by colons. For example, if path is '/a/b/c/d/e', the ID should be 'c:d:e'.\n" +
-                        "    -   'sourcePath': The original 'sourcePath' of the item.\n" +
-                        "    -   'eventType': If the 'sourcePath' or other metadata suggests a holiday or event (e.g., 'mothers-day', 'valentines-day'), identify it here. Otherwise, null.\n" +
-                        "    -   'provenance': An object containing metadata about this enrichment process. It must include:\n" +
-                        "        -   'modelId': Use the value \"%s\".\n" +
-                        "        -   'promptId': Use the static value \"content-enrichment-v2\".\n\n" +
-                        "Here is the JSON object to analyze:\n" +
-                        "<item_json>\n%s\n</item_json>\n\n" +
+                "Human: You are an expert content analyst AI. Your task is to analyze a piece of text and provide a set of standard content enrichments. " +
+                        "You will be given the text itself in a <content> tag, and a rich JSON object providing the context of where this content lives in a <context> tag.\n\n" +
+                        "Use the metadata in the <context> object, such as the `pathHierarchy` and `facets`, to generate more accurate and relevant enrichments.\n\n" +
+                        "Please provide a single, valid JSON object as your response with no extra commentary. " +
+                        "The response JSON should have one top-level key: \"standardEnrichments\".\n\n" +
+                        "The `standardEnrichments` object must contain the following keys:\n" +
+                        "- 'summary': A concise summary of the content.\n" +
+                        "- 'keywords': A JSON array of up to 10 relevant keywords. Keywords should be lowercase.\n" +
+                        "- 'sentiment': The overall sentiment (choose one: positive, negative, neutral).\n" +
+                        "- 'classification': A general content category (e.g., 'product description', 'legal disclaimer', 'promotional heading').\n" +
+                        "- 'tags': A JSON array of up to 5 relevant tags that can be used for filtering or grouping.\n\n" +
+                        "<content>\n%s\n</content>\n\n" +
+                        "<context>\n%s\n</context>\n\n" +
                         "Assistant: Here is the single, valid JSON object with the requested enrichments:\n";
 
-        return String.format(promptTemplate, this.bedrockModelId, itemToEnrich.toString());
-
+        return String.format(promptTemplate, cleansedContent, contextJson);
     }
 
-    public Map<String, Object> enrichItem(JsonNode itemToEnrich) {
+
+    public Map<String, Object> enrichItem(JsonNode itemContent, EnrichmentContext context) {
         String effectiveModelId = this.bedrockModelId;
-        logger.info("Starting enrichment for item using model: {}. Item path: {}", effectiveModelId, itemToEnrich.path("sourcePath").asText());
+        String sourcePath = (context != null && context.getEnvelope() != null) ? context.getEnvelope().getSourcePath() : "Unknown";
+        logger.info("Starting enrichment for item using model: {}. Item path: {}", effectiveModelId, sourcePath);
 
         Map<String, Object> results = new HashMap<>();
         results.put("enrichedWithModel", effectiveModelId);
@@ -104,7 +100,7 @@ public class BedrockEnrichmentService {
 
         while (retryCount < maxRetries) {
             try {
-                String prompt = createEnrichmentPrompt(itemToEnrich);
+                String prompt = createEnrichmentPrompt(itemContent, context);
 
                 ObjectNode payload = objectMapper.createObjectNode();
                 payload.put("anthropic_version", "bedrock-2023-05-31");
@@ -126,10 +122,10 @@ public class BedrockEnrichmentService {
                         .body(body)
                         .build();
 
-                logger.debug("Bedrock InvokeModel Request for path {}: {}", itemToEnrich.path("sourcePath").asText(), payloadJson);
+                logger.debug("Bedrock InvokeModel Request for path {}: {}", itemContent.path("sourcePath").asText(), payloadJson);
                 InvokeModelResponse response = bedrockClient.invokeModel(request);
                 String responseBodyString = response.body().asUtf8String();
-                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", itemToEnrich.path("sourcePath").asText(), responseBodyString);
+                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", itemContent.path("sourcePath").asText(), responseBodyString);
 
                 JsonNode responseJson = objectMapper.readTree(responseBodyString);
                 JsonNode contentBlock = responseJson.path("content");
