@@ -1,12 +1,8 @@
 package com.apple.springboot.model;
 
-//import jakarta.persistence.*;
-import javax.persistence.*;
+import jakarta.persistence.*;
 import lombok.Getter;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.Type;
 import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
@@ -14,16 +10,11 @@ import java.util.UUID;
 
 @Getter
 @Entity
-    @Table(name = "raw_data_store")
+@Table(name = "raw_data_store")
 public class RawDataStore {
 
-    // Getters and Setters
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(
-            name = "UUID",
-            strategy = "org.hibernate.id.UUIDGenerator"
-    )
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
@@ -33,16 +24,13 @@ public class RawDataStore {
     @Column(name = "raw_content_text", columnDefinition = "TEXT")
     private String rawContentText;
 
-    //@Lob
     @Column(name = "raw_content_binary", columnDefinition = "bytea")
     private byte[] rawContentBinary;
 
-    //@Type(type = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "source_metadata", columnDefinition = "jsonb")
     private String sourceMetadata; // Store as JSON string
 
-    @CreationTimestamp
     @Column(name = "received_at", nullable = false, updatable = false)
     private OffsetDateTime receivedAt;
 

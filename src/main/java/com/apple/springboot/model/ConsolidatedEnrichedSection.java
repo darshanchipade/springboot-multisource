@@ -1,12 +1,10 @@
 package com.apple.springboot.model;
 
+import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.Type;
 import org.hibernate.type.SqlTypes;
 
-import javax.persistence.*;
 import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.UUID;
@@ -23,7 +21,7 @@ import java.util.UUID;
 public class ConsolidatedEnrichedSection {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
@@ -33,8 +31,7 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "original_field_name")
     private String originalFieldName;
 
-   // @Type(type = "jsonb")
-   @JdbcTypeCode(SqlTypes.JSON)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "enrichment_metadata", columnDefinition = "jsonb")
     private String enrichmentMetadata;
 
@@ -53,11 +50,13 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "classification")
     private String classification;
 
-    @Column(name = "tags", columnDefinition = "TEXT[]")
-    private String[] tags;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "tags")
+    private java.util.List<String> tags;
 
-    @Column(name = "keywords", columnDefinition = "TEXT[]")
-    private String[] keywords;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "keywords")
+    private java.util.List<String> keywords;
 
     @Column(name = "cleansed_text", columnDefinition = "TEXT")
     private String cleansedText;
@@ -71,7 +70,6 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "model_used")
     private String modelUsed;
 
-    //@Type(type = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;

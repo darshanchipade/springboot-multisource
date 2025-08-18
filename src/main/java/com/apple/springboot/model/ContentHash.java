@@ -3,7 +3,9 @@ package com.apple.springboot.model;
 import lombok.Getter;
 import lombok.Setter;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
+import org.hibernate.annotations.UuidGenerator;
+
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -15,6 +17,7 @@ import java.util.Objects;
 public class ContentHash {
 
     @Id
+    @UuidGenerator
     @Column(name = "source_path", nullable = false, columnDefinition = "TEXT")
     private String sourcePath;
 

@@ -1,6 +1,6 @@
 package com.apple.springboot.model;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
 
 
 import java.time.OffsetDateTime;
@@ -10,10 +10,7 @@ import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.Type;
 import org.hibernate.type.SqlTypes;
-//import org.hibernate.annotations.JdbcTypeCode;
-//import org.hibernate.type.SqlTypes;
 
 @Setter
 @Getter
@@ -44,7 +41,6 @@ public class EnrichedContentElement {
     @Column(name = "cleansed_text", columnDefinition = "TEXT")
     private String cleansedText;
 
-    //@Type(type = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;
@@ -52,10 +48,9 @@ public class EnrichedContentElement {
     @Column(name = "summary", columnDefinition = "TEXT")
     private String summary;
 
-    //@JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "keywords", columnDefinition = "text[]")
-    //private List<String> keywords;
-    private String[] keywords;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "keywords")
+    private List<String> keywords;
 
     @Column(name = "sentiment", columnDefinition = "TEXT")
     private String sentiment;
@@ -63,19 +58,14 @@ public class EnrichedContentElement {
     @Column(name = "classification", columnDefinition = "TEXT")
     private String classification;
 
-    //@JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "tags", columnDefinition = "text[]")
-    //private List<String> tags;
-    private String [] tags;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "tags")
+    private List<String> tags;
 
     @Column(name = "bedrock_model_used", columnDefinition = "TEXT")
     private String bedrockModelUsed;
 
-   // @JdbcTypeCode(SqlTypes.JSON)
-
-    //@Type(type = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
-    //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "enrichment_metadata", columnDefinition = "jsonb")
     private String enrichmentMetadata; // Store as String, expecting JSON formatted string
 
@@ -88,8 +78,8 @@ public class EnrichedContentElement {
     @Column(name = "version")
     private Integer version;
 
-   // @Column(name = "content_hash")
-   // private String contentHash;
+    // @Column(name = "content_hash")
+    // private String contentHash;
 
     // Constructors
     public EnrichedContentElement() {

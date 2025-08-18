@@ -117,7 +117,25 @@ public class EnrichmentPipelineService {
                     throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
                 }
 
+                // Manually add the context to the results from Bedrock before validation.
+                if (itemDetail.context != null) {
+                    Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+
+                    // Add fields required by the validator that are not returned by the AI
+                    String fullContextId = itemDetail.sourcePath + "::" + itemDetail.originalFieldName;
+                    contextMap.put("fullContextId", fullContextId);
+                    contextMap.put("sourcePath", itemDetail.sourcePath);
+
+                    Map<String, Object> provenance = new HashMap<>();
+                    provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
+                    contextMap.put("provenance", provenance);
+
+                    enrichmentResultsFromBedrock.put("context", contextMap);
+                }
+
+
                 if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
+                    logger.error("Final response object before validation failed: {}", objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
                     throw new RuntimeException("Validation failed for AI response structure. Check logs for details.");
                 }
 
@@ -196,8 +214,8 @@ public class EnrichmentPipelineService {
         enrichedElement.setSentiment((String) standardEnrichments.getOrDefault("sentiment", "Error: Missing sentiment"));
         enrichedElement.setClassification((String) standardEnrichments.getOrDefault("classification", "Error: Missing classification"));
 
-        enrichedElement.setKeywords(extractList(standardEnrichments, "keywords", itemDetail.sourcePath).toArray(new String[0]));
-        enrichedElement.setTags(extractList(standardEnrichments, "tags", itemDetail.sourcePath).toArray(new String[0]));
+        enrichedElement.setKeywords(extractList(standardEnrichments, "keywords", itemDetail.sourcePath));
+        enrichedElement.setTags(extractList(standardEnrichments, "tags", itemDetail.sourcePath));
 
         // Provenance is now inside the context map
         enrichedElement.setBedrockModelUsed((String) bedrockResponse.getOrDefault("enrichedWithModel", bedrockEnrichmentService.getConfiguredModelId()));

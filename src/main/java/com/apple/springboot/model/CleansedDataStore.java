@@ -1,38 +1,29 @@
 package com.apple.springboot.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.*;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-import software.amazon.awssdk.services.s3.endpoints.internal.Value;
-
-import javax.persistence.*;
-import javax.persistence.Entity;
-import javax.persistence.Table;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import com.vladmihalcea.hibernate.type.json.JsonBinaryType;
 
 @Setter
 @Getter
 @Entity
 @Table(name = "cleansed_data_store")
-@TypeDefs({
-        @TypeDef(name = "jsonb", typeClass = JsonBinaryType.class)  // Register jsonb mapping
-})
-
 public class CleansedDataStore {
 
-    // Getters and Setters
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(
-            name = "UUID",
-            strategy = "org.hibernate.id.UUIDGenerator"
-    )
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
@@ -42,26 +33,18 @@ public class CleansedDataStore {
     @Column(name = "source_uri", nullable = false, columnDefinition = "TEXT")
     private String sourceUri;
 
-   // @Type(type = "jsonb")
-   @JdbcTypeCode(SqlTypes.JSON)
-    //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "cleansed_items", nullable = false, columnDefinition = "jsonb")
-    //private String cleansedItems;
     private List<Map<String, Object>> cleansedItems;
 
-   // @Type(type = "jsonb")
-   @JdbcTypeCode(SqlTypes.JSON)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context", columnDefinition = "jsonb")
     private Map<String, Object> context;
 
-    //@Type(type = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
-    //@Type(type = "com.vladmihalcea.hibernate.type.json.JsonStringType")
     @Column(name = "cleansing_errors", columnDefinition = "jsonb")
     private Map<String, Object> cleansingErrors;
 
-
-    @CreationTimestamp
     @Column(name = "cleansed_at", nullable = false, updatable = false)
     private OffsetDateTime cleansedAt;
 

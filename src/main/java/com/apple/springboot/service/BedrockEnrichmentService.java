@@ -122,10 +122,10 @@ public class BedrockEnrichmentService {
                         .body(body)
                         .build();
 
-                logger.debug("Bedrock InvokeModel Request for path {}: {}", itemContent.path("sourcePath").asText(), payloadJson);
+                logger.debug("Bedrock InvokeModel Request for path {}: {}", sourcePath, payloadJson);
                 InvokeModelResponse response = bedrockClient.invokeModel(request);
                 String responseBodyString = response.body().asUtf8String();
-                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", itemContent.path("sourcePath").asText(), responseBodyString);
+                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", sourcePath, responseBodyString);
 
                 JsonNode responseJson = objectMapper.readTree(responseBodyString);
                 JsonNode contentBlock = responseJson.path("content");

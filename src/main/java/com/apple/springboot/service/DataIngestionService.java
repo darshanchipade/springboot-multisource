@@ -24,11 +24,14 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class DataIngestionService {
 
     private static final Logger logger = LoggerFactory.getLogger(DataIngestionService.class);
+    private static final Pattern LOCALE_PATTERN = Pattern.compile("/([a-z]{2}_[A-Z]{2})/");
 
     private final RawDataStoreRepository rawDataStoreRepository;
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
@@ -39,8 +42,6 @@ public class DataIngestionService {
     private final String defaultS3BucketName;
     private final ContentHashRepository contentHashRepository;
     private final ContextUpdateService contextUpdateService;
-    private final Set<String> enrichableModels;
-
     /**
      * Constructs the service with required repositories and config values.
      */
@@ -62,7 +63,6 @@ public class DataIngestionService {
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
-        this.enrichableModels = new HashSet<>(Arrays.asList("markdown-inline-copy"));
     }
 
 
@@ -362,12 +362,10 @@ public class DataIngestionService {
                     newOrUpdatedItems.add(item);
                     existingHash.setContentHash(contentHash);
                     existingHash.setContextHash(contextHash);
-                    contentHashRepository.save(existingHash);
                 } else if (contextHash != null && !contextHash.equals(existingHash.getContextHash())) {
                     contextOnlyUpdatedItems.add(item);
                     contextUpdateService.updateContext(sourcePath, itemType, (Map<String, Object>) item.get("context"));
                     existingHash.setContextHash(contextHash);
-                    contentHashRepository.save(existingHash);
                 }
             } else {
                 newOrUpdatedItems.add(item);
@@ -474,11 +472,11 @@ public class DataIngestionService {
                                          Envelope parentEnvelope,
                                          Facets parentFacets,
                                          List<Map<String, Object>> results) {
+
         if (currentNode.isObject()) {
-            Envelope currentEnvelope = new Envelope();
-            if (parentEnvelope != null) {
-                currentEnvelope = objectMapper.convertValue(objectMapper.convertValue(parentEnvelope, Map.class), Envelope.class);
-            }
+            Envelope currentEnvelope = (parentEnvelope != null)
+                    ? objectMapper.convertValue(objectMapper.convertValue(parentEnvelope, Map.class), Envelope.class)
+                    : new Envelope();
 
             Facets currentFacets = new Facets();
             if (parentFacets != null) {
@@ -500,7 +498,19 @@ public class DataIngestionService {
             String currentSourcePath = currentNode.path("_path").asText(parentEnvelope != null ? parentEnvelope.getSourcePath() : null);
             currentEnvelope.setSourcePath(currentSourcePath);
 
-            // Logic to build pathHierarchy
+            if (currentSourcePath != null) {
+                Matcher matcher = LOCALE_PATTERN.matcher(currentSourcePath);
+                if (matcher.find()) {
+                    String locale = matcher.group(1);
+                    currentEnvelope.setLocale(locale);
+                    String[] parts = locale.split("_");
+                    if (parts.length == 2) {
+                        currentEnvelope.setLanguage(parts[0]);
+                        currentEnvelope.setCountry(parts[1]);
+                    }
+                }
+            }
+
             List<String> pathHierarchy = new ArrayList<>(parentEnvelope.getPathHierarchy() != null ? parentEnvelope.getPathHierarchy() : Collections.emptyList());
             if (currentSourcePath != null && !currentSourcePath.equals(parentEnvelope.getSourcePath())) {
                 String[] segments = currentSourcePath.split("/");
@@ -513,52 +523,51 @@ public class DataIngestionService {
             }
             currentEnvelope.setPathHierarchy(pathHierarchy);
 
+            final Set<String> contentFieldKeys = Set.of("copy", "disclaimer", "analytics");
 
-            // Check if the current model is in our enrichable list
-            if (enrichableModels.contains(currentModel)) {
-                JsonNode copyNode = currentNode.get("copy");
-                if (copyNode != null && copyNode.isTextual()) {
-                    String copyText = copyNode.asText();
-                    if (!copyText.isBlank()) {
-                        String cleansed = cleanseCopyText(copyText);
-                        if (!cleansed.isBlank()) {
-                            EnrichmentContext finalContext = new EnrichmentContext();
-                            finalContext.setEnvelope(currentEnvelope);
-                            finalContext.setFacets(currentFacets);
-
-                            Map<String, Object> item = new HashMap<>();
-                            item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + ".copy");
-                            item.put("itemType", "copy");
-                            item.put("originalFieldName", "copy");
-                            item.put("cleansedContent", cleansed);
-                            item.put("contentHash", calculateContentHash(cleansed, null));
-                            item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
-                            item.put("contextHash", calculateContentHash(objectMapper.convertValue(finalContext, JsonNode.class).toString(), null));
-                            if (currentModel != null) item.put("model", currentModel);
-                            results.add(item);
-                            logger.debug("Extracted enrichable item: {}", item);
-                        }
-                    }
-                }
-                // Stop recursing further down this branch once we've extracted content
-                return;
-            }
-
-            // If not an enrichable model, recurse into children
-//            currentNode.fields().forEachRemaining(entry -> {
-//                String fieldKey = entry.getKey();
-//                JsonNode fieldValue = entry.getValue();
-//                String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
-//                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
-//            });
-            Iterator<Map.Entry<String, JsonNode>> it = currentNode.fields();
-            while (it.hasNext()) {
-                Map.Entry<String, JsonNode> entry = it.next();
+            currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
                 JsonNode fieldValue = entry.getValue();
-                String newJsonPath = "$".equals(currentJsonPath) ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
-                findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
-            }
+
+                if (contentFieldKeys.contains(fieldKey)) {
+                    String cleansedContent = null;
+                    Facets itemFacets = new Facets(); // Clone for this specific item
+                    itemFacets.putAll(currentFacets);
+
+                    if (fieldKey.equals("analytics") && fieldValue.isObject()) {
+                        String name = fieldValue.path("name").asText(null);
+                        String value = fieldValue.path("value").asText(null);
+                        if (name != null && value != null) {
+                            cleansedContent = cleanseCopyText(value);
+                            itemFacets.put("analyticsName", name);
+                        }
+                    } else if (fieldValue.isTextual()) {
+                        cleansedContent = cleanseCopyText(fieldValue.asText());
+                    }
+
+                    if (cleansedContent != null && !cleansedContent.isBlank()) {
+                        EnrichmentContext finalContext = new EnrichmentContext(currentEnvelope, itemFacets);
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("sourcePath", currentSourcePath != null ? currentSourcePath : currentJsonPath + "." + fieldKey);
+                        item.put("itemType", fieldKey); // e.g., "copy", "disclaimer"
+                        item.put("originalFieldName", fieldKey);
+                        item.put("cleansedContent", cleansedContent);
+                        item.put("contentHash", calculateContentHash(cleansedContent, null));
+                        item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+                        item.put("contextHash", calculateContentHash(objectMapper.convertValue(finalContext, JsonNode.class).toString(), null));
+                        if (currentModel != null) item.put("model", currentModel);
+                        results.add(item);
+                        logger.debug("Extracted enrichable item: {}", item);
+                    }
+                }
+
+                // Always recurse into container nodes
+                if (fieldValue.isObject() || fieldValue.isArray()) {
+                    String newJsonPath = currentJsonPath.equals("$") ? "$." + fieldKey : currentJsonPath + "." + fieldKey;
+                    findAndExtractRecursive(fieldValue, newJsonPath, currentEnvelope, currentFacets, results);
+                }
+            });
+
         } else if (currentNode.isArray()) {
             for (int i = 0; i < currentNode.size(); i++) {
                 String newJsonPath = currentJsonPath + "[" + i + "]";

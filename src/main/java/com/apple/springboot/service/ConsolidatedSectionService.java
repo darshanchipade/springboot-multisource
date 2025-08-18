@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 // import org.springframework.beans.factory.annotation.Autowired; // Not used
 import org.springframework.stereotype.Service;
 
-import javax.transaction.Transactional;
+import jakarta.transaction.Transactional;
 import java.time.OffsetDateTime;
 import java.util.List;
 // import java.util.Map; // Not used
@@ -59,7 +59,6 @@ public class ConsolidatedSectionService {
                     item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText(), cleansedData.getVersion());
             if (!exists) {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
-                section.setId(UUID.randomUUID());
                 section.setCleansedDataId(cleansedData.getId());
                 section.setVersion(cleansedData.getVersion());
                 section.setSourceUri(item.getSourceUri());
