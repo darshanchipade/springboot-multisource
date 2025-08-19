@@ -19,19 +19,22 @@ import org.springframework.util.FileCopyUtils;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.*;
-
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
 @Service
 public class DataIngestionService {
 
     private static final Logger logger = LoggerFactory.getLogger(DataIngestionService.class);
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer", "analytics");
 
     private final RawDataStoreRepository rawDataStoreRepository;
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer", "analytics");
+    private static final Pattern LOCALE_PATTERN = Pattern.compile("/([a-z]{2}_[A-Z]{2})/");
+
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final ResourceLoader resourceLoader;
@@ -39,7 +42,11 @@ public class DataIngestionService {
     private final S3StorageService s3StorageService;
     private final String defaultS3BucketName;
     private final ContentHashRepository contentHashRepository;
+    private final ContextUpdateService contextUpdateService;
 
+    /**
+     * Constructs the service with required repositories and config values.
+     */
     public DataIngestionService(RawDataStoreRepository rawDataStoreRepository,
                                 CleansedDataStoreRepository cleansedDataStoreRepository,
                                 ContentHashRepository contentHashRepository,
@@ -47,16 +54,19 @@ public class DataIngestionService {
                                 ResourceLoader resourceLoader,
                                 @Value("${app.json.file.path}") String jsonFilePath,
                                 S3StorageService s3StorageService,
-                                @Value("${app.s3.bucket-name}") String defaultS3BucketName) {
+                                @Value("${app.s3.bucket-name}") String defaultS3BucketName,
+                                ContextUpdateService contextUpdateService) {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.contentHashRepository = contentHashRepository;
+        this.contextUpdateService = contextUpdateService;
         this.objectMapper = objectMapper;
         this.resourceLoader = resourceLoader;
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
     }
+
 
     private static class S3ObjectDetails {
         final String bucketName;
@@ -66,7 +76,6 @@ public class DataIngestionService {
             this.fileKey = fileKey;
         }
     }
-
     private S3ObjectDetails parseS3Uri(String s3Uri) throws IllegalArgumentException {
         if (s3Uri == null || !s3Uri.startsWith("s3://")) {
             throw new IllegalArgumentException("Invalid S3 URI format: Must start with s3://. Received: " + s3Uri);
@@ -89,141 +98,368 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Loads JSON from configured path and processes it.
+     * Handles both S3 and classpath loading strategies.
+     */
     @Transactional
-    public CleansedDataStore ingestAndCleanseJsonPayload(String jsonPayload, String sourceIdentifier) throws JsonProcessingException {
-        logger.info("Starting ingestion for sourceIdentifier: {}", sourceIdentifier);
-
-        if (jsonPayload == null || jsonPayload.trim().isEmpty()) {
-            RawDataStore rawData = new RawDataStore();
-            rawData.setSourceUri(sourceIdentifier);
-            rawData.setReceivedAt(OffsetDateTime.now());
-            rawData.setRawContentText(jsonPayload);
-            rawData.setStatus("EMPTY_PAYLOAD");
+    public CleansedDataStore ingestAndCleanseSingleFile() throws JsonProcessingException {
+        try {
+            return ingestAndCleanseSingleFile(this.jsonFilePath);
+        } catch (IOException | RuntimeException e) {
+            logger.error("Error processing default jsonFilePath '{}': {}. Creating error record.", this.jsonFilePath, e.getMessage(), e);
+            String sourceUri;
+            if (!this.jsonFilePath.startsWith("s3://") && !this.jsonFilePath.startsWith("classpath:")) {
+                sourceUri = "classpath:" + this.jsonFilePath;
+            } else {
+                sourceUri = this.jsonFilePath;
+            }
+            String finalSourceUri = sourceUri;
+            RawDataStore rawData = rawDataStoreRepository.findBySourceUri(finalSourceUri).orElseGet(() -> {
+                RawDataStore newRawData = new RawDataStore();
+                newRawData.setSourceUri(finalSourceUri);
+                return newRawData;
+            });
+            if(rawData.getReceivedAt() == null) rawData.setReceivedAt(OffsetDateTime.now());
+            rawData.setStatus("FILE_PROCESSING_ERROR");
+            rawData.setRawContentText("Error processing file: " + e.getMessage());
             rawDataStoreRepository.save(rawData);
-            return createAndSaveErrorCleansedDataStore(rawData, "SOURCE_EMPTY_PAYLOAD", "PayloadError: Received empty or null JSON payload.");
+            return createAndSaveErrorCleansedDataStore(rawData, "FILE_ERROR", "ERROR FROM FILE","FileProcessingError: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Handles ingestion for a specific identifier (s3:// or classpath:).
+     * Performs validation, raw storage, deduplication, and cleansing.
+     */
+    @Transactional
+    public CleansedDataStore ingestAndCleanseSingleFile(String identifier) throws IOException {
+        logger.info("Starting ingestion and cleansing for identifier: {}", identifier);
+        String rawJsonContent;
+        String sourceUriForDb = identifier;
+        RawDataStore rawDataStore = new RawDataStore();
+        rawDataStore.setSourceUri(sourceUriForDb);
+        rawDataStore.setReceivedAt(OffsetDateTime.now());
+
+        if (identifier.startsWith("s3://")) {
+            logger.info("Identifier is an S3 URI: {}", sourceUriForDb);
+            try {
+                S3ObjectDetails s3Details = parseS3Uri(sourceUriForDb);
+                rawJsonContent = s3StorageService.downloadFileContent(s3Details.bucketName, s3Details.fileKey);
+                //setting up source content type
+                if (s3Details.fileKey.endsWith(".json")) {
+                    rawDataStore.setSourceContentType("application/json");
+                } else {
+                    rawDataStore.setSourceContentType("application/octet-stream");
+                }
+
+                try {
+                    JsonNode rootNode = objectMapper.readTree(rawJsonContent);
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_model");
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_path");
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("copy");
+                    rawDataStore.setSourceMetadata(objectMapper.writeValueAsString(rootNode));
+                } catch (JsonProcessingException e) {
+                    logger.error("Error processing JSON payload to extract metadata", e);
+                }
+                if (rawJsonContent == null) {
+                    logger.warn("File not found or content is null from S3 URI: {}.", sourceUriForDb);
+                    rawDataStore.setStatus("S3_FILE_NOT_FOUND_OR_EMPTY");
+                    rawDataStoreRepository.save(rawDataStore);
+                    return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_FILE_NOT_FOUND_OR_EMPTY", "S3 ERROR", "S3Error: File not found or content was null at " + sourceUriForDb);
+                }
+                logger.info("Successfully downloaded content from S3 URI: {}", sourceUriForDb);
+                rawDataStore.setStatus("S3_CONTENT_RECEIVED");
+            } catch (IllegalArgumentException e) {
+                logger.error("Invalid S3 URI format for identifier: '{}'. Error: {}", identifier, e.getMessage());
+                rawDataStore.setStatus("INVALID_S3_URI");
+                rawDataStore.setRawContentText("Invalid S3 URI: " + e.getMessage());
+                rawDataStoreRepository.save(rawDataStore);
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "INVALID_S3_URI","INVALID S3", "InvalidS3URI: " + e.getMessage());
+            } catch (Exception e) {
+                logger.error("Failed to download S3 content for URI: '{}'. Error: {}", sourceUriForDb, e.getMessage(), e);
+                rawDataStore.setStatus("S3_DOWNLOAD_FAILED");
+                rawDataStore.setRawContentText("Error fetching S3 content: " + e.getMessage());
+                rawDataStoreRepository.save(rawDataStore);
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_DOWNLOAD_FAILED", "S3ERROR","S3DownloadError: " + e.getMessage());
+            }
+        } else {
+            sourceUriForDb = identifier.startsWith("classpath:") ? identifier : "classpath:" + identifier;
+            rawDataStore.setSourceUri(sourceUriForDb);
+            rawDataStore.setSourceContentType("application/json");
+            logger.info("Identifier is a classpath resource: {}", sourceUriForDb);
+            Resource resource = resourceLoader.getResource(sourceUriForDb);
+            if (!resource.exists()) {
+                logger.error("Classpath resource not found: {}", sourceUriForDb);
+                rawDataStore.setStatus("CLASSPATH_FILE_NOT_FOUND");
+                rawDataStoreRepository.save(rawDataStore);
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_FILE_NOT_FOUND", "FILE NOT FOUND","ClasspathError: File not found at " + sourceUriForDb);
+            }
+            try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
+                rawJsonContent = FileCopyUtils.copyToString(reader);
+            } catch (IOException e) {
+                logger.error("Failed to read raw JSON file from classpath: {}", sourceUriForDb, e);
+                rawDataStore.setStatus("CLASSPATH_READ_ERROR");
+                rawDataStore.setRawContentText("Error reading classpath file: " + e.getMessage());
+                rawDataStoreRepository.save(rawDataStore);
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_READ_ERROR", "READ ERROR","IOError: " + e.getMessage());
+            }
+            try{
+                JsonNode rootNode = objectMapper.readTree(rawJsonContent);
+                ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_model");
+                ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("_path");
+                ((com.fasterxml.jackson.databind.node.ObjectNode) rootNode).remove("copy");
+                rawDataStore.setSourceMetadata(objectMapper.writeValueAsString(rootNode));
+            } catch (JsonProcessingException e) {
+                logger.error("Error processing JSON payload to extract metadata", e);
+            }
+            rawDataStore.setStatus("CLASSPATH_CONTENT_RECEIVED");
         }
 
+        if (rawJsonContent == null || rawJsonContent.trim().isEmpty()) {
+            logger.warn("Raw JSON content from {} is effectively empty after loading.", sourceUriForDb);
+            rawDataStore.setRawContentText(rawJsonContent);
+            rawDataStore.setStatus("EMPTY_CONTENT_LOADED");
+            RawDataStore savedForEmpty = rawDataStoreRepository.save(rawDataStore);
+            return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
+        }
+        String contextJson = null;
+        try {
+            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
+            if (contextResource.exists()) {
+                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
+                    contextJson = FileCopyUtils.copyToString(reader);
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Could not read context-config.json, continuing without it.", e);
+        }
+        String contentHash = calculateContentHash(rawJsonContent, contextJson);
+        Optional<RawDataStore> existingRawDataOpt = rawDataStoreRepository.findBySourceUriAndContentHash(sourceUriForDb, contentHash);
+
+        if (existingRawDataOpt.isPresent()) {
+            RawDataStore existingRawData = existingRawDataOpt.get();
+            logger.info("Duplicate content detected for source: {}. Using existing raw_data_id: {}", sourceUriForDb, existingRawData.getId());
+            Optional<CleansedDataStore> existingCleansedData = cleansedDataStoreRepository.findByRawDataId(existingRawData.getId());
+            if(existingCleansedData.isPresent()){
+                logger.info("Found existing cleansed data for raw_data_id: {}. Skipping processing.", existingRawData.getId());
+                return existingCleansedData.get();
+            } else {
+                logger.info("No existing cleansed data for raw_data_id: {}. Proceeding with processing.", existingRawData.getId());
+                return processLoadedContent(rawJsonContent, existingRawData);
+            }
+        }
+
+        rawDataStore.setRawContentText(rawJsonContent);
+        rawDataStore.setRawContentBinary(rawJsonContent.getBytes(StandardCharsets.UTF_8));
+        rawDataStore.setContentHash(contentHash);
+
+        // Versioning logic
+        Optional<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceUriForDb);
+        if (!latestVersionOpt.isEmpty()) {
+            RawDataStore latestVersion = latestVersionOpt.get();
+            if (latestVersion.getLatest()) {
+                latestVersion.setLatest(false);
+                rawDataStoreRepository.save(latestVersion);
+            }
+            rawDataStore.setVersion(latestVersion.getVersion() + 1);
+        } else {
+            rawDataStore.setVersion(1);
+        }
+
+        RawDataStore savedRawDataStore = rawDataStoreRepository.save(rawDataStore);
+        logger.info("Processed raw data with ID: {} for source: {} with status: {}", savedRawDataStore.getId(), sourceUriForDb, savedRawDataStore.getStatus());
+
+        return processLoadedContent(rawJsonContent, savedRawDataStore);
+    }
+    @Transactional
+    public CleansedDataStore ingestAndCleanseJsonPayload(String jsonPayload, String sourceIdentifier) {
+        RawDataStore rawDataStore = findOrCreateRawDataStore(jsonPayload, sourceIdentifier);
+        if (rawDataStore == null) {
+            return null;
+        }
+        return processLoadedContent(jsonPayload, rawDataStore);
+    }
+
+    private RawDataStore findOrCreateRawDataStore(String jsonPayload, String sourceIdentifier) {
         String newContentHash = calculateContentHash(jsonPayload, null);
         Optional<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceIdentifier);
 
-        RawDataStore rawDataStore;
         if (latestVersionOpt.isPresent()) {
-            rawDataStore = latestVersionOpt.get();
+            RawDataStore rawDataStore = latestVersionOpt.get();
             if (Objects.equals(rawDataStore.getContentHash(), newContentHash)) {
                 logger.info("Ingested content for sourceIdentifier '{}' has not changed. Skipping processing.", sourceIdentifier);
-                return cleansedDataStoreRepository.findTopByRawDataIdOrderByCleansedAtDesc(rawDataStore.getId()).orElse(null);
+                return null;
             }
             logger.info("Found existing RawDataStore with ID {}. Content has changed, updating record.", rawDataStore.getId());
+            rawDataStore.setReceivedAt(OffsetDateTime.now());
+            rawDataStore.setRawContentText(jsonPayload);
+            rawDataStore.setContentHash(newContentHash);
+            return rawDataStoreRepository.save(rawDataStore);
         } else {
-            rawDataStore = new RawDataStore();
+            RawDataStore rawDataStore = new RawDataStore();
             rawDataStore.setSourceUri(sourceIdentifier);
             rawDataStore.setVersion(1);
+            rawDataStore.setReceivedAt(OffsetDateTime.now());
+            rawDataStore.setRawContentText(jsonPayload);
+            rawDataStore.setContentHash(newContentHash);
             logger.info("No existing RawDataStore found for sourceIdentifier {}. Creating a new one.", sourceIdentifier);
+            return rawDataStoreRepository.save(rawDataStore);
         }
-
-        rawDataStore.setReceivedAt(OffsetDateTime.now());
-        rawDataStore.setRawContentText(jsonPayload);
-        rawDataStore.setContentHash(newContentHash);
-        rawDataStore.setStatus("RECEIVED");
-
-        RawDataStore savedRawDataStore = rawDataStoreRepository.save(rawDataStore);
-        return processLoadedContent(jsonPayload, savedRawDataStore);
-    }
-    @Transactional
-    public CleansedDataStore ingestAndCleanseSingleFile() throws IOException {
-        return ingestAndCleanseSingleFile(this.jsonFilePath);
-    }
-
-    @Transactional
-    public CleansedDataStore ingestAndCleanseSingleFile(String identifier) throws IOException {
-        logger.info("Starting ingestion for identifier: {}", identifier);
-        String rawJsonContent;
-        String sourceUriForDb = identifier;
-
-        try {
-            if (identifier.startsWith("s3://")) {
-                S3ObjectDetails s3Details = parseS3Uri(sourceUriForDb);
-                rawJsonContent = s3StorageService.downloadFileContent(s3Details.bucketName, s3Details.fileKey);
-            } else {
-                sourceUriForDb = identifier.startsWith("classpath:") ? identifier : "classpath:" + identifier;
-                Resource resource = resourceLoader.getResource(sourceUriForDb);
-                if (!resource.exists()) throw new IOException("Classpath resource not found: " + sourceUriForDb);
-                try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-                    rawJsonContent = FileCopyUtils.copyToString(reader);
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to load content for identifier '{}': {}", identifier, e.getMessage(), e);
-            RawDataStore errorStore = new RawDataStore();
-            errorStore.setSourceUri(sourceUriForDb);
-            errorStore.setReceivedAt(OffsetDateTime.now());
-            errorStore.setStatus("CONTENT_LOAD_ERROR");
-            errorStore.setRawContentText("Failed to load content: " + e.getMessage());
-            rawDataStoreRepository.save(errorStore);
-            return createAndSaveErrorCleansedDataStore(errorStore, "CONTENT_LOAD_ERROR", "ContentLoadError: " + e.getMessage());
-        }
-
-        return ingestAndCleanseJsonPayload(rawJsonContent, sourceUriForDb);
     }
 
     private CleansedDataStore processLoadedContent(String rawJsonContent, RawDataStore associatedRawDataStore) {
-        List<Map<String, Object>> allExtractedItems;
         try {
             JsonNode rootNode = objectMapper.readTree(rawJsonContent);
-            allExtractedItems = new ArrayList<>();
-            findAndExtractRecursive(rootNode, "$", new Envelope(), new Facets(), allExtractedItems);
+            List<Map<String, Object>> allExtractedItems = new ArrayList<>();
+
+            Envelope rootEnvelope = new Envelope();
+            rootEnvelope.setSourcePath(associatedRawDataStore.getSourceUri());
+
+            findAndExtractRecursive(rootNode, rootEnvelope, new Facets(), allExtractedItems);
+
+            List<Map<String, Object>> itemsToProcess = filterForChangedItems(allExtractedItems);
+
+            if (itemsToProcess.isEmpty()) {
+                logger.info("No new or updated content to process for raw_data_id: {}", associatedRawDataStore.getId());
+                associatedRawDataStore.setStatus("PROCESSED_NO_CHANGES");
+                rawDataStoreRepository.save(associatedRawDataStore);
+                return cleansedDataStoreRepository.findTopByRawDataIdOrderByCleansedAtDesc(associatedRawDataStore.getId()).orElse(null);
+            }
+
+            return createCleansedDataStore(itemsToProcess, associatedRawDataStore);
+
         } catch (Exception e) {
+            logger.error("Error during content processing for raw data ID: {}. Error: {}", associatedRawDataStore.getId(), e.getMessage(), e);
             associatedRawDataStore.setStatus("EXTRACTION_ERROR");
             rawDataStoreRepository.save(associatedRawDataStore);
-            return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "ExtractionError: " + e.getMessage());
+            return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "ExtractionError: " + e.getMessage(),"Failed");
         }
+    }
 
-        List<Map<String, Object>> itemsToProcess = new ArrayList<>();
-        for (Map<String, Object> item : allExtractedItems) {
+    private List<Map<String, Object>> filterForChangedItems(List<Map<String, Object>> allItems) {
+        List<Map<String, Object>> changedItems = new ArrayList<>();
+        for (Map<String, Object> item : allItems) {
             String sourcePath = (String) item.get("sourcePath");
             String itemType = (String) item.get("itemType");
             String newContentHash = (String) item.get("contentHash");
 
-            Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
+            if (sourcePath == null || itemType == null) continue;
 
-            if (existingHashOpt.isEmpty()) {
-                logger.debug("No existing content hash found for item [{}::{}]. Marking as new.", sourcePath, itemType);
-                itemsToProcess.add(item);
-                contentHashRepository.save(new ContentHash(sourcePath, itemType, newContentHash, (String) item.get("contextHash")));
-            } else {
-                ContentHash existingHash = existingHashOpt.get();
-                if (!Objects.equals(existingHash.getContentHash(), newContentHash)) {
-                    logger.debug("Content hash changed for item [{}::{}]. Marking for update.", sourcePath, itemType);
-                    itemsToProcess.add(item);
-                    existingHash.setContentHash(newContentHash);
-                    existingHash.setContextHash((String) item.get("contextHash"));
-                    contentHashRepository.save(existingHash);
-                } else {
-                    logger.debug("Content hash for item [{}::{}] is unchanged. Skipping.", sourcePath, itemType);
-                }
+            Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
+            if (existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContentHash(), newContentHash)) {
+                changedItems.add(item);
+                ContentHash hashToSave = existingHashOpt.orElse(new ContentHash(sourcePath, itemType, null, null));
+                hashToSave.setContentHash(newContentHash);
+                hashToSave.setContextHash((String) item.get("contextHash"));
+                contentHashRepository.save(hashToSave);
             }
         }
+        return changedItems;
+    }
 
-        if (itemsToProcess.isEmpty()) {
-            logger.info("No new or updated content to process for raw_data_id: {}", associatedRawDataStore.getId());
-            associatedRawDataStore.setStatus("PROCESSED_NO_CHANGES");
-            rawDataStoreRepository.save(associatedRawDataStore);
-            return cleansedDataStoreRepository.findTopByRawDataIdOrderByCleansedAtDesc(associatedRawDataStore.getId()).orElse(null);
+    private CleansedDataStore createCleansedDataStore(List<Map<String, Object>> items, RawDataStore rawData) {
+        CleansedDataStore cleansedDataStore = new CleansedDataStore();
+        cleansedDataStore.setRawDataId(rawData.getId());
+        cleansedDataStore.setSourceUri(rawData.getSourceUri());
+        cleansedDataStore.setCleansedAt(OffsetDateTime.now());
+        cleansedDataStore.setCleansedItems(items);
+        cleansedDataStore.setVersion(rawData.getVersion());
+        cleansedDataStore.setStatus("CLEANSED_PENDING_ENRICHMENT");
+        rawData.setStatus("CLEANSING_COMPLETE");
+        rawDataStoreRepository.save(rawData);
+        return cleansedDataStoreRepository.save(cleansedDataStore);
+    }
+
+    private void findAndExtractRecursive(JsonNode currentNode, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
+        if (currentNode.isObject()) {
+            Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
+            Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
+
+            currentNode.fields().forEachRemaining(entry -> {
+                String fieldKey = entry.getKey();
+                JsonNode fieldValue = entry.getValue();
+
+                if (CONTENT_FIELD_KEYS.contains(fieldKey) && fieldValue.isTextual()) {
+                    processContentField(fieldValue.asText(), fieldKey, currentEnvelope, currentFacets, results);
+                } else if (fieldValue.isObject() || fieldValue.isArray()) {
+                    findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
+                }
+            });
+        } else if (currentNode.isArray()) {
+            for (JsonNode node : currentNode) {
+                findAndExtractRecursive(node, parentEnvelope, parentFacets, results);
+            }
+        }
+    }
+
+
+    private Envelope buildCurrentEnvelope(JsonNode currentNode, Envelope parentEnvelope) {
+        Envelope currentEnvelope = new Envelope();
+        String path = currentNode.has("_path") ? currentNode.get("_path").asText(parentEnvelope.getSourcePath()) : parentEnvelope.getSourcePath();
+        currentEnvelope.setSourcePath(path);
+        currentEnvelope.setModel(currentNode.path("_model").asText(parentEnvelope.getModel()));
+        currentEnvelope.setUsagePath(currentNode.path("_usagePath").asText(parentEnvelope.getUsagePath()));
+
+        if (currentNode.has("_provenance")) {
+            try {
+                Map<String, String> provenanceMap = objectMapper.convertValue(currentNode.get("_provenance"), new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {});
+                currentEnvelope.setProvenance(provenanceMap);
+            } catch (IllegalArgumentException e) {
+                logger.warn("Could not parse _provenance field as a Map for path: {}", path, e);
+                currentEnvelope.setProvenance(parentEnvelope.getProvenance());
+            }
+        } else {
+            currentEnvelope.setProvenance(parentEnvelope.getProvenance());
         }
 
-        CleansedDataStore cleansedDataStore = new CleansedDataStore();
-        cleansedDataStore.setRawDataId(associatedRawDataStore.getId());
-        cleansedDataStore.setSourceUri(associatedRawDataStore.getSourceUri());
-        cleansedDataStore.setCleansedAt(OffsetDateTime.now());
-        cleansedDataStore.setCleansedItems(itemsToProcess);
-        cleansedDataStore.setVersion(associatedRawDataStore.getVersion());
-        cleansedDataStore.setStatus("CLEANSED_PENDING_ENRICHMENT");
+        if (path != null) {
+            Matcher matcher = LOCALE_PATTERN.matcher(path);
+            if (matcher.find()) {
+                String locale = matcher.group(1);
+                currentEnvelope.setLocale(locale);
+                String[] parts = locale.split("_");
+                if (parts.length == 2) {
+                    currentEnvelope.setLanguage(parts[0]);
+                    currentEnvelope.setCountry(parts[1]);
+                }
+            }
+            currentEnvelope.setPathHierarchy(Arrays.asList(path.split("/")));
+        }
+        return currentEnvelope;
+    }
 
-        associatedRawDataStore.setStatus("CLEANSING_COMPLETE");
-        rawDataStoreRepository.save(associatedRawDataStore);
+    private Facets buildCurrentFacets(JsonNode currentNode, Facets parentFacets) {
+        Facets currentFacets = new Facets();
+        currentFacets.putAll(parentFacets);
+        currentFacets.remove("copy"); // Remove generic copy if it exists
+        currentNode.fields().forEachRemaining(entry -> {
+            if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
+                currentFacets.put(entry.getKey(), entry.getValue().asText());
+            }
+        });
+        return currentFacets;
+    }
 
-        return cleansedDataStoreRepository.save(cleansedDataStore);
-
+    private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results) {
+        String cleansedContent = cleanseCopyText(content);
+        if (cleansedContent != null && !cleansedContent.isBlank()) {
+            EnrichmentContext finalContext = new EnrichmentContext(envelope, facets);
+            Map<String, Object> item = new HashMap<>();
+            item.put("sourcePath", envelope.getSourcePath());
+            item.put("itemType", fieldKey);
+            item.put("originalFieldName", fieldKey);
+            item.put("model", envelope.getModel());
+            item.put("cleansedContent", cleansedContent);
+            item.put("contentHash", calculateContentHash(cleansedContent, null));
+            try {
+                item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
+                item.put("contextHash", calculateContentHash(objectMapper.writeValueAsString(finalContext), null));
+            } catch (JsonProcessingException e) {
+                logger.error("Failed to process context for hashing", e);
+            }
+            results.add(item);
+        }
     }
 
     private String calculateContentHash(String content, String context) {
@@ -251,7 +487,7 @@ public class DataIngestionService {
         return hexString.toString();
     }
 
-    private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorMessage) {
+    private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorMessage, String specificErrorMessage) {
         CleansedDataStore errorCleansedData = new CleansedDataStore();
         if (rawDataStore != null) {
             errorCleansedData.setRawDataId(rawDataStore.getId());
@@ -264,51 +500,6 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(errorCleansedData);
     }
 
-    private void findAndExtractRecursive(JsonNode currentNode, String currentJsonPath, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
-        if (currentNode.isObject()) {
-            Envelope currentEnvelope = new Envelope();
-            currentEnvelope.setModel(currentNode.path("_model").asText(parentEnvelope.getModel()));
-            currentEnvelope.setSourcePath(currentNode.path("_path").asText(parentEnvelope.getSourcePath()));
-
-            Facets currentFacets = new Facets();
-            currentFacets.putAll(parentFacets);
-            currentNode.fields().forEachRemaining(entry -> {
-                if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
-                    currentFacets.put(entry.getKey(), entry.getValue().asText());
-                }
-            });
-
-            currentNode.fields().forEachRemaining(entry -> {
-                String fieldKey = entry.getKey();
-                JsonNode fieldValue = entry.getValue();
-
-                if (CONTENT_FIELD_KEYS.contains(fieldKey) && fieldValue.isTextual()) {
-                    String cleansedContent = cleanseCopyText(fieldValue.asText());
-                    if (cleansedContent != null && !cleansedContent.isBlank()) {
-                        EnrichmentContext finalContext = new EnrichmentContext(currentEnvelope, currentFacets);
-                        Map<String, Object> item = new HashMap<>();
-                        item.put("sourcePath", currentEnvelope.getSourcePath());
-                        item.put("itemType", fieldKey);
-                        item.put("cleansedContent", cleansedContent);
-                        item.put("contentHash", calculateContentHash(cleansedContent, null));
-                        try {
-                            item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
-                            item.put("contextHash", calculateContentHash(objectMapper.writeValueAsString(finalContext), null));
-                        } catch (JsonProcessingException e) {
-                            logger.error("Failed to process context for hashing", e);
-                        }
-                        results.add(item);
-                    }
-                } else if (fieldValue.isObject() || fieldValue.isArray()) {
-                    findAndExtractRecursive(fieldValue, currentJsonPath + "." + fieldKey, currentEnvelope, currentFacets, results);
-                }
-            });
-        } else if (currentNode.isArray()) {
-            for (int i = 0; i < currentNode.size(); i++) {
-                findAndExtractRecursive(currentNode.get(i), currentJsonPath + "[" + i + "]", parentEnvelope, parentFacets, results);
-            }
-        }
-    }
     private static String cleanseCopyText(String text) {
         if (text == null) return null;
         String cleansed = text.replaceAll("\\{%.*?%\\}", " ");

@@ -132,7 +132,10 @@ public class BedrockEnrichmentService {
                 if (textContent.startsWith("{") && textContent.endsWith("}")) {
                     try {
                         // The entire response is the result map
-                        return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
+                       // return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
+                        Map<String, Object> aiResults = objectMapper.readValue(textContent, new TypeReference<>() {});
+                        aiResults.put("enrichedWithModel", effectiveModelId);
+                        return aiResults;
                     } catch (JsonProcessingException e) {
                         logger.error("Failed to parse JSON content from Bedrock response: {}. Error: {}", textContent, e.getMessage());
                         results.put("error", "Failed to parse JSON from Bedrock response");

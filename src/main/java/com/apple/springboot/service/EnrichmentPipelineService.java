@@ -109,7 +109,15 @@ public class EnrichmentPipelineService {
                     throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
                 }
 
-                enrichmentResultsFromBedrock.put("context", objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+                // **THE FIX IS HERE**: Restore the logic to add required metadata before validation.
+                Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                String fullContextId = itemDetail.sourcePath + "::" + itemDetail.originalFieldName;
+                contextMap.put("fullContextId", fullContextId);
+                contextMap.put("sourcePath", itemDetail.sourcePath);
+                Map<String, Object> provenance = new HashMap<>();
+                provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
+                contextMap.put("provenance", provenance);
+                enrichmentResultsFromBedrock.put("context", contextMap);
 
                 if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
                     throw new RuntimeException("Validation failed for AI response structure. Check logs for details: " + objectMapper.writeValueAsString(enrichmentResultsFromBedrock));

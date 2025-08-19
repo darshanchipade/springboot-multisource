@@ -4,6 +4,7 @@ import com.apple.springboot.model.CleansedDataStore;
 import com.apple.springboot.model.ConsolidatedEnrichedSection;
 import com.apple.springboot.model.EnrichedContentElement;
 import com.apple.springboot.repository.ConsolidatedEnrichedSectionRepository;
+import com.apple.springboot.repository.ContentHashRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,11 +21,14 @@ public class ConsolidatedSectionService {
 
     private final EnrichedContentElementRepository enrichedRepo;
     private final ConsolidatedEnrichedSectionRepository consolidatedRepo;
+    private final ContentHashRepository contentHashRepository;
+
 
     public ConsolidatedSectionService(EnrichedContentElementRepository enrichedRepo,
-                                      ConsolidatedEnrichedSectionRepository consolidatedRepo) {
+                                      ConsolidatedEnrichedSectionRepository consolidatedRepo, ContentHashRepository contentHashRepository) {
         this.enrichedRepo = enrichedRepo;
         this.consolidatedRepo = consolidatedRepo;
+        this.contentHashRepository = contentHashRepository;
     }
 
     @Transactional
@@ -49,6 +53,18 @@ public class ConsolidatedSectionService {
                 section.setSectionPath(item.getItemSourcePath());
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
                 section.setCleansedText(item.getCleansedText());
+                contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                        .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
+                // String hash = contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                //        .map(ContentHash::getContentHash)
+                //        .orElse(item.getContentHash()); // fallback to item-level hash
+
+                //if (hash != null) {
+                //    section.setContentHash(hash);
+                // } else {
+                //    logger.warn("No content hash found for item path '{}', field '{}'.", item.getItemSourcePath(), item.getItemOriginalFieldName());
+                // }
+                //section.setContentHash(item.getContentHash());
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());
                 section.setKeywords(item.getKeywords());
