@@ -17,7 +17,6 @@ import java.util.Objects;
 public class ContentHash {
 
     @Id
-    @UuidGenerator
     @Column(name = "source_path", nullable = false, columnDefinition = "TEXT")
     private String sourcePath;
 

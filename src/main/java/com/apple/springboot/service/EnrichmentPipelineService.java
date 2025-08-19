@@ -27,7 +27,6 @@ public class EnrichmentPipelineService {
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final ConsolidatedSectionService consolidatedSectionService;
-
     private final AIResponseValidator aiResponseValidator;
 
     private static class CleansedItemDetail {
@@ -35,15 +34,13 @@ public class EnrichmentPipelineService {
         public final String originalFieldName;
         public final String cleansedContent;
         public final String model;
-        public final String contentHash;
         public final EnrichmentContext context;
 
-        public CleansedItemDetail(String sourcePath, String originalFieldName, String cleansedContent, String model, String contentHash, EnrichmentContext context) {
+        public CleansedItemDetail(String sourcePath, String originalFieldName, String cleansedContent, String model, EnrichmentContext context) {
             this.sourcePath = sourcePath;
             this.originalFieldName = originalFieldName;
             this.cleansedContent = cleansedContent;
             this.model = model;
-            this.contentHash = contentHash;
             this.context = context;
         }
     }
@@ -72,10 +69,9 @@ public class EnrichmentPipelineService {
         UUID cleansedDataStoreId = cleansedDataEntry.getId();
         logger.info("Starting enrichment process for CleansedDataStore ID: {}", cleansedDataStoreId);
 
-        String initialStatus = cleansedDataEntry.getStatus();
-        if (!"CLEANSED_PENDING_ENRICHMENT".equals(initialStatus)) {
+        if (!"CLEANSED_PENDING_ENRICHMENT".equals(cleansedDataEntry.getStatus())) {
             logger.info("CleansedDataStore ID: {} is not in 'CLEANSED_PENDING_ENRICHMENT' state (current: {}). Skipping enrichment.",
-                    cleansedDataStoreId, initialStatus);
+                    cleansedDataStoreId, cleansedDataEntry.getStatus());
             return;
         }
 
@@ -91,8 +87,6 @@ public class EnrichmentPipelineService {
         }
 
         List<CleansedItemDetail> itemsToEnrich = convertMapsToCleansedItemDetails(maps);
-
-        logger.info("Found {} items to enrich for CleansedDataStore ID: {}", itemsToEnrich.size(), cleansedDataStoreId);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failureCount = new AtomicInteger(0);
         AtomicInteger skippedByRateLimitCount = new AtomicInteger(0);
@@ -105,38 +99,20 @@ public class EnrichmentPipelineService {
             }
 
             try {
-                // We only need a small part of the itemDetail for the prompt, not the whole thing.
-                // Let's create a simple map for that.
                 Map<String, String> itemContent = new HashMap<>();
                 itemContent.put("cleansedContent", itemDetail.cleansedContent);
-
                 JsonNode itemContentAsJson = objectMapper.valueToTree(itemContent);
+
                 Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichItem(itemContentAsJson, itemDetail.context);
 
                 if (enrichmentResultsFromBedrock.containsKey("error")) {
                     throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
                 }
 
-                // Manually add the context to the results from Bedrock before validation.
-                if (itemDetail.context != null) {
-                    Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-
-                    // Add fields required by the validator that are not returned by the AI
-                    String fullContextId = itemDetail.sourcePath + "::" + itemDetail.originalFieldName;
-                    contextMap.put("fullContextId", fullContextId);
-                    contextMap.put("sourcePath", itemDetail.sourcePath);
-
-                    Map<String, Object> provenance = new HashMap<>();
-                    provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
-                    contextMap.put("provenance", provenance);
-
-                    enrichmentResultsFromBedrock.put("context", contextMap);
-                }
-
+                enrichmentResultsFromBedrock.put("context", objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
 
                 if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
-                    logger.error("Final response object before validation failed: {}", objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
-                    throw new RuntimeException("Validation failed for AI response structure. Check logs for details.");
+                    throw new RuntimeException("Validation failed for AI response structure. Check logs for details: " + objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
                 }
 
                 saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
@@ -160,25 +136,15 @@ public class EnrichmentPipelineService {
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {
         return maps.stream()
                 .map(map -> {
-                    String sourcePath = map.get("sourcePath") != null ? map.get("sourcePath").toString() : null;
-                    String originalFieldName = map.get("originalFieldName") != null ? map.get("originalFieldName").toString() : null;
-                    String cleansedContent = map.get("cleansedContent") != null ? map.get("cleansedContent").toString() : null;
-                    String model = map.get("model") != null ? map.get("model").toString() : null;
-                    String contentHash = map.get("contentHash") != null ? map.get("contentHash").toString() : null;
-                    EnrichmentContext context = null;
-                    if (map.containsKey("context")) {
-                        try {
-                            context = objectMapper.convertValue(map.get("context"), EnrichmentContext.class);
-                        } catch (IllegalArgumentException e) {
-                            logger.warn("Could not convert context map to EnrichmentContext object for sourcePath: {}", sourcePath, e);
-                        }
-                    }
-
-
-                    if (sourcePath != null && originalFieldName != null && cleansedContent != null) {
-                        return new CleansedItemDetail(sourcePath, originalFieldName, cleansedContent, model, contentHash, context);
-                    } else {
-                        logger.warn("Skipping map in convertMapsToCleansedItemDetails due to missing essential fields: {}", map);
+                    try {
+                        String sourcePath = (String) map.get("sourcePath");
+                        String originalFieldName = (String) map.get("originalFieldName");
+                        String cleansedContent = (String) map.get("cleansedContent");
+                        String model = (String) map.get("model");
+                        EnrichmentContext context = objectMapper.convertValue(map.get("context"), EnrichmentContext.class);
+                        return new CleansedItemDetail(sourcePath, originalFieldName, cleansedContent, model, context);
+                    } catch (Exception e) {
+                        logger.warn("Could not convert map to CleansedItemDetail object. Skipping item. Map: {}, Error: {}", map, e.getMessage());
                         return null;
                     }
                 })
@@ -197,48 +163,19 @@ public class EnrichmentPipelineService {
         enrichedElement.setItemModelHint(itemDetail.model);
         enrichedElement.setCleansedText(itemDetail.cleansedContent);
         enrichedElement.setEnrichedAt(OffsetDateTime.now());
+        enrichedElement.setContext(objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
 
-        // The context now comes from the itemDetail, not the Bedrock response.
-        if (itemDetail.context != null) {
-            Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
-            enrichedElement.setContext(contextMap);
-            logger.info("Saving context for {}: {}", itemDetail.sourcePath, contextMap);
-        } else {
-            enrichedElement.setContext(new HashMap<>());
-        }
-
-        // The bedrock response might still have a standardEnrichments wrapper
         @SuppressWarnings("unchecked")
         Map<String, Object> standardEnrichments = (Map<String, Object>) bedrockResponse.getOrDefault("standardEnrichments", bedrockResponse);
 
-
-        enrichedElement.setSummary((String) standardEnrichments.getOrDefault("summary", "Error: Missing summary"));
-        enrichedElement.setSentiment((String) standardEnrichments.getOrDefault("sentiment", "Error: Missing sentiment"));
-        enrichedElement.setClassification((String) standardEnrichments.getOrDefault("classification", "Error: Missing classification"));
-
-        enrichedElement.setKeywords(extractList(standardEnrichments, "keywords", itemDetail.sourcePath));
-        enrichedElement.setTags(extractList(standardEnrichments, "tags", itemDetail.sourcePath));
-
-        // Provenance is now inside the context map
-        enrichedElement.setBedrockModelUsed((String) bedrockResponse.getOrDefault("enrichedWithModel", bedrockEnrichmentService.getConfiguredModelId()));
-
-        // Store any other non-standard fields in the metadata column
-        Map<String, Object> bedrockMeta = new HashMap<>(bedrockResponse);
-        bedrockMeta.remove("standardEnrichments");
-        bedrockMeta.remove("context");
-        if (bedrockResponse.containsKey("error")) {
-            bedrockMeta.put("bedrockItemProcessingError", bedrockResponse.get("error"));
-        }
-
-        if (!bedrockMeta.isEmpty()) {
-            try {
-                enrichedElement.setEnrichmentMetadata(objectMapper.writeValueAsString(bedrockMeta));
-            } catch (JsonProcessingException e) {
-                logger.error("Error serializing Bedrock metadata for item path {}: {}", itemDetail.sourcePath, e.getMessage());
-                enrichedElement.setEnrichmentMetadata("{\"error\":\"Could not serialize Bedrock metadata\"}");
-            }
-        }
+        enrichedElement.setSummary((String) standardEnrichments.get("summary"));
+        enrichedElement.setSentiment((String) standardEnrichments.get("sentiment"));
+        enrichedElement.setClassification((String) standardEnrichments.get("classification"));
+        enrichedElement.setKeywords((List<String>) standardEnrichments.get("keywords"));
+        enrichedElement.setTags((List<String>) standardEnrichments.get("tags"));
+        enrichedElement.setBedrockModelUsed((String) bedrockResponse.get("enrichedWithModel"));
         enrichedElement.setStatus(elementStatus);
+
         enrichedContentElementRepository.save(enrichedElement);
     }
 
@@ -253,132 +190,43 @@ public class EnrichmentPipelineService {
         errorElement.setCleansedText(itemDetail.cleansedContent);
         errorElement.setEnrichedAt(OffsetDateTime.now());
         errorElement.setStatus(status);
+        errorElement.setContext(objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
 
-        // Set enrichment fields to error defaults
-        errorElement.setSummary("Error: Enrichment failed.");
-        errorElement.setSentiment("unknown");
-        errorElement.setClassification("unknown");
-        errorElement.setKeywords(Collections.singletonList("error"));
-        errorElement.setTags(Collections.singletonList("error"));
-        errorElement.setBedrockModelUsed(bedrockEnrichmentService.getConfiguredModelId());
-
-        // Also save the context for the error record
-        if (itemDetail.context != null) {
-            Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-            errorElement.setContext(contextMap);
-        }
-
-        // Store the error message in the metadata field
         Map<String, Object> bedrockMeta = new HashMap<>();
         bedrockMeta.put("enrichmentError", errorMessage);
         try {
             errorElement.setEnrichmentMetadata(objectMapper.writeValueAsString(bedrockMeta));
         } catch (JsonProcessingException e) {
-            logger.error("Error serializing error message for item path {}: {}", itemDetail.sourcePath, e.getMessage());
-            errorElement.setEnrichmentMetadata("{\"error\":\"Could not serialize error message\"}");
+            errorElement.setEnrichmentMetadata("Error could not serialize");
         }
 
         enrichedContentElementRepository.save(errorElement);
-        logger.info("Saved error record for item path '{}' with status {}", itemDetail.sourcePath, status);
     }
 
-    private List<String> extractList(Map<String, Object> map, String key, String sourcePath) {
-        Object obj = map.get(key);
-        if (obj instanceof List) {
-            try {
-                @SuppressWarnings("unchecked")
-                List<String> list = (List<String>) obj;
-                return list;
-            } catch (ClassCastException e) {
-                logger.warn("Could not cast {} to List<String> for item path: {}. Value: {}", key, sourcePath, obj, e);
-            }
-        }
-        logger.warn("{} field was not a List for item path: {}. Received: {}", key, sourcePath, obj != null ? obj.getClass().getName() : "null");
-        return Collections.emptyList();
-    }
-
-
-    /**
-     * Finalizes the enrichment process by determining the final status of the CleansedDataStore record,
-     * generating a summary of enrichment and storing it in the cleansingErrors field.
-     *
-     * @param cleansedDataEntry the CleansedDataStore record to update
-     * @param successCount number of items successfully enriched
-     * @param failureCount number of items failed during enrichment
-     * @param skippedByRateLimitCount number of items skipped due to rate limiting
-     * @param totalDeserializedItems total number of items attempted
-     * @param itemProcessingErrors list of error messages during enrichment which will help us determine the excat issue
-     * @throws JsonProcessingException if serializing error summary fails
-     */
-
-    private void updateFinalCleansedDataStatus(CleansedDataStore cleansedDataEntry, int successCount, int failureCount, int skippedByRateLimitCount, int totalDeserializedItems, List<String> itemProcessingErrors) throws JsonProcessingException {
+    private void updateFinalCleansedDataStatus(CleansedDataStore cleansedDataEntry, int successCount, int failureCount, int skippedByRateLimitCount, int totalItems, List<String> itemProcessingErrors) {
         String finalStatus;
-        int itemsAttempted = successCount + failureCount + skippedByRateLimitCount;
-
-        if (totalDeserializedItems == 0) {
-            finalStatus = "ENRICHED_NO_ITEMS_TO_PROCESS";
-        } else if (itemsAttempted == 0 && totalDeserializedItems > 0) {
-            finalStatus = "ENRICHED_ALL_SKIPPED_EMPTY_TEXT";
-        } else if (failureCount == 0 && skippedByRateLimitCount == 0 && successCount > 0 && successCount == itemsAttempted) {
+        if (failureCount == 0 && skippedByRateLimitCount == 0 && successCount == totalItems) {
             finalStatus = "ENRICHED_COMPLETE";
         } else if (successCount > 0) {
             finalStatus = "PARTIALLY_ENRICHED";
-        } else if (failureCount > 0 && successCount == 0 && skippedByRateLimitCount == 0) {
-            finalStatus = "ENRICHMENT_FAILED_ALL_ATTEMPTED";
-        } else if (skippedByRateLimitCount > 0 && successCount == 0 && failureCount == 0) {
-            finalStatus = "ENRICHMENT_SKIPPED_ALL_RATE_LIMIT";
         } else {
-            finalStatus = "ENRICHMENT_ISSUES_DETECTED";
+            finalStatus = "ENRICHMENT_FAILED";
         }
-
         cleansedDataEntry.setStatus(finalStatus);
-        Map<String, Object> processingSummary = new HashMap<>();
-        processingSummary.put("totalDeserializedItems", totalDeserializedItems);
-        processingSummary.put("itemsAttemptedForEnrichment", itemsAttempted);
-        processingSummary.put("successfullyEnriched", successCount);
-        processingSummary.put("failedEnrichmentAttempts", failureCount);
-        processingSummary.put("skippedByRateLimit", skippedByRateLimitCount);
-        if (!itemProcessingErrors.isEmpty()) {
-            try {
-                List<String> shortErrorMessages = itemProcessingErrors.stream()
-                        .map(err -> err.length() > 255 ? err.substring(0, 252) + "..." : err)
-                        .collect(Collectors.toList());
-                processingSummary.put("itemProcessingErrorMessages", shortErrorMessages);
-            } catch (Exception e) {
-                logger.error("Error processing itemProcessingErrorMessages for summary: {}", e.getMessage());
-                processingSummary.put("itemProcessingErrorMessages", "Error list too large or unprocessable");
-            }
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalItems", totalItems);
+        summary.put("successfullyEnriched", successCount);
+        summary.put("failedEnrichment", failureCount);
+        summary.put("skippedByRateLimit", skippedByRateLimitCount);
+        summary.put("errors", itemProcessingErrors);
+        try {
+            cleansedDataEntry.setCleansingErrors(summary);
+        } catch (Exception e) {
+            logger.error("Could not set processing summary", e);
         }
-        updateEnrichmentErrorDetails(cleansedDataEntry, "EnrichmentRunSummary", processingSummary);
+
         cleansedDataStoreRepository.save(cleansedDataEntry);
-        logger.info("Finished enrichment for CleansedDataStore ID: {}. Final status: {}. Summary: {}", cleansedDataEntry.getId(), finalStatus, processingSummary);
-    }
-
-    /**
-     * Adds an enrichment-related error or summary to the cleansingErrors field of the CleansedDataStore record.
-     *
-     * @param cleansedDataEntry the CleansedDataStore to update
-     * @param errorKey a descriptive label for the error (e.g., "EnrichmentRunSummary")
-     * @param errorValue the error content, can be a string or map
-     * @throws JsonProcessingException if serialization of errorValue fails
-     */
-
-    private void updateEnrichmentErrorDetails(CleansedDataStore cleansedDataEntry, String errorKey, Object errorValue) throws JsonProcessingException {
-        Map<String, Object> errorsMap;
-
-        if (cleansedDataEntry.getCleansingErrors() != null) {
-            try {
-                errorsMap = cleansedDataEntry.getCleansingErrors();
-            } catch (Exception e) {
-                logger.warn("Failed to use existing cleansing_errors map, initializing new one. Error: {}", e.getMessage());
-                errorsMap = new HashMap<>();
-                errorsMap.put("parsing_error_for_existing_cleansing_errors", cleansedDataEntry.getCleansingErrors().toString());
-            }
-        } else {
-            errorsMap = new HashMap<>();
-        }
-
-        errorsMap.put(OffsetDateTime.now().toString() + "_" + errorKey, errorValue);
-        cleansedDataEntry.setCleansingErrors(errorsMap);
+        logger.info("Finished enrichment for CleansedDataStore ID: {}. Final status: {}", cleansedDataEntry.getId(), finalStatus);
     }
 }

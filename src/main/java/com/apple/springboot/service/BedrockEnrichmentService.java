@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.core.retry.backoff.BackoffStrategy;
@@ -86,6 +87,7 @@ public class BedrockEnrichmentService {
     }
 
 
+    @RateLimiter(name = "bedrock")
     public Map<String, Object> enrichItem(JsonNode itemContent, EnrichmentContext context) {
         String effectiveModelId = this.bedrockModelId;
         String sourcePath = (context != null && context.getEnvelope() != null) ? context.getEnvelope().getSourcePath() : "Unknown";
@@ -94,94 +96,72 @@ public class BedrockEnrichmentService {
         Map<String, Object> results = new HashMap<>();
         results.put("enrichedWithModel", effectiveModelId);
 
-        int maxRetries = 5;
-        int retryCount = 0;
-        long backoff = 1000;
+        try {
+            String prompt = createEnrichmentPrompt(itemContent, context);
 
-        while (retryCount < maxRetries) {
-            try {
-                String prompt = createEnrichmentPrompt(itemContent, context);
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("anthropic_version", "bedrock-2023-05-31");
+            payload.put("max_tokens", 4096);
+            List<ObjectNode> messages = new ArrayList<>();
+            ObjectNode userMessage = objectMapper.createObjectNode();
+            userMessage.put("role", "user");
+            userMessage.put("content", prompt);
+            messages.add(userMessage);
+            payload.set("messages", objectMapper.valueToTree(messages));
 
-                ObjectNode payload = objectMapper.createObjectNode();
-                payload.put("anthropic_version", "bedrock-2023-05-31");
-                payload.put("max_tokens", 4096);
-                List<ObjectNode> messages = new ArrayList<>();
-                ObjectNode userMessage = objectMapper.createObjectNode();
-                userMessage.put("role", "user");
-                userMessage.put("content", prompt);
-                messages.add(userMessage);
-                payload.set("messages", objectMapper.valueToTree(messages));
+            String payloadJson = objectMapper.writeValueAsString(payload);
+            SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
 
-                String payloadJson = objectMapper.writeValueAsString(payload);
-                SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
+            InvokeModelRequest request = InvokeModelRequest.builder()
+                    .modelId(bedrockModelId)
+                    .contentType("application/json")
+                    .accept("application/json")
+                    .body(body)
+                    .build();
 
-                InvokeModelRequest request = InvokeModelRequest.builder()
-                        .modelId(bedrockModelId)
-                        .contentType("application/json")
-                        .accept("application/json")
-                        .body(body)
-                        .build();
+            logger.debug("Bedrock InvokeModel Request for path {}: {}", sourcePath, payloadJson);
+            InvokeModelResponse response = bedrockClient.invokeModel(request);
+            String responseBodyString = response.body().asUtf8String();
+            logger.debug("Bedrock InvokeModel Response Body for path {}: {}", sourcePath, responseBodyString);
 
-                logger.debug("Bedrock InvokeModel Request for path {}: {}", sourcePath, payloadJson);
-                InvokeModelResponse response = bedrockClient.invokeModel(request);
-                String responseBodyString = response.body().asUtf8String();
-                logger.debug("Bedrock InvokeModel Response Body for path {}: {}", sourcePath, responseBodyString);
+            JsonNode responseJson = objectMapper.readTree(responseBodyString);
+            JsonNode contentBlock = responseJson.path("content");
 
-                JsonNode responseJson = objectMapper.readTree(responseBodyString);
-                JsonNode contentBlock = responseJson.path("content");
-
-                if (contentBlock.isArray() && contentBlock.size() > 0) {
-                    String textContent = contentBlock.get(0).path("text").asText("");
-                    if (textContent.startsWith("{") && textContent.endsWith("}")) {
-                        try {
-                            // The entire response is the result map
-                            return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
-                        } catch (JsonProcessingException e) {
-                            logger.error("Failed to parse JSON content from Bedrock response: {}. Error: {}", textContent, e.getMessage());
-                            results.put("error", "Failed to parse JSON from Bedrock response");
-                            results.put("raw_bedrock_response", textContent);
-                            return results;
-                        }
-                    } else {
-                        logger.error("Bedrock response content is not a JSON object: {}", textContent);
-                        results.put("error", "Bedrock response content is not a JSON object");
+            if (contentBlock.isArray() && contentBlock.size() > 0) {
+                String textContent = contentBlock.get(0).path("text").asText("");
+                if (textContent.startsWith("{") && textContent.endsWith("}")) {
+                    try {
+                        // The entire response is the result map
+                        return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
+                    } catch (JsonProcessingException e) {
+                        logger.error("Failed to parse JSON content from Bedrock response: {}. Error: {}", textContent, e.getMessage());
+                        results.put("error", "Failed to parse JSON from Bedrock response");
                         results.put("raw_bedrock_response", textContent);
-                    }
-                } else {
-                    logger.error("Bedrock response does not contain expected content block or content is not an array.");
-                    results.put("error", "Bedrock response structure unexpected");
-                    results.put("raw_bedrock_response", responseBodyString);
-                }
-            } catch (BedrockRuntimeException e) {
-                if (e.awsErrorDetails().errorCode().equals("ThrottlingException")) {
-                    retryCount++;
-                    if (retryCount >= maxRetries) {
-                        logger.error("Bedrock API error during enrichment for model {}: {}", effectiveModelId, e.awsErrorDetails().errorMessage(), e);
-                        results.put("error", "Bedrock API error: " + e.awsErrorDetails().errorMessage());
-                        results.put("aws_error_code", e.awsErrorDetails().errorCode());
                         return results;
                     }
-                    try {
-                        Thread.sleep(backoff);
-                    } catch (InterruptedException interruptedException) {
-                        Thread.currentThread().interrupt();
-                    }
-                    backoff *= 2;
                 } else {
-                    logger.error("Bedrock API error during enrichment for model {}: {}", effectiveModelId, e.awsErrorDetails().errorMessage(), e);
-                    results.put("error", "Bedrock API error: " + e.awsErrorDetails().errorMessage());
-                    results.put("aws_error_code", e.awsErrorDetails().errorCode());
-                    return results;
+                    logger.error("Bedrock response content is not a JSON object: {}", textContent);
+                    results.put("error", "Bedrock response content is not a JSON object");
+                    results.put("raw_bedrock_response", textContent);
                 }
-            } catch (JsonProcessingException e) {
-                logger.error("JSON processing error during Bedrock request/response handling for model {}: {}", effectiveModelId, e.getMessage(), e);
-                results.put("error", "JSON processing error: " + e.getMessage());
-                return results;
-            } catch (Exception e) {
-                logger.error("Unexpected error during Bedrock enrichment for model {}: {}", effectiveModelId, e.getMessage(), e);
-                results.put("error", "Unexpected error during enrichment: " + e.getMessage());
-                return results;
+            } else {
+                logger.error("Bedrock response does not contain expected content block or content is not an array.");
+                results.put("error", "Bedrock response structure unexpected");
+                results.put("raw_bedrock_response", responseBodyString);
             }
+        } catch (BedrockRuntimeException e) {
+            logger.error("Bedrock API error during enrichment for model {}: {}", effectiveModelId, e.awsErrorDetails().errorMessage(), e);
+            results.put("error", "Bedrock API error: " + e.awsErrorDetails().errorMessage());
+            results.put("aws_error_code", e.awsErrorDetails().errorCode());
+            return results;
+        } catch (JsonProcessingException e) {
+            logger.error("JSON processing error during Bedrock request/response handling for model {}: {}", effectiveModelId, e.getMessage(), e);
+            results.put("error", "JSON processing error: " + e.getMessage());
+            return results;
+        } catch (Exception e) {
+            logger.error("Unexpected error during Bedrock enrichment for model {}: {}", effectiveModelId, e.getMessage(), e);
+            results.put("error", "Unexpected error during enrichment: " + e.getMessage());
+            return results;
         }
         return results;
     }

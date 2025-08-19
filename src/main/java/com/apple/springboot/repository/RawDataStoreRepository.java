@@ -13,5 +13,5 @@ public interface RawDataStoreRepository extends JpaRepository<RawDataStore, UUID
     Optional<RawDataStore> findBySourceUri(String sourceUri);
     Optional<RawDataStore> findByContentHash(String contentHash);
     Optional<RawDataStore> findBySourceUriAndContentHash(String sourceUri, String contentHash);
-    List<RawDataStore> findTopBySourceUriOrderByVersionDesc(String sourceUri);
+    Optional<RawDataStore> findTopBySourceUriOrderByVersionDesc(String sourceUri);
 }
