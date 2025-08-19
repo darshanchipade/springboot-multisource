@@ -143,10 +143,12 @@ public class EnrichmentPipelineService {
                 successCount.incrementAndGet();
             } catch (RequestNotPermitted rnp) {
                 logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataStoreId, itemDetail.sourcePath, rnp);
+                saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_RATE_LIMITED", rnp.getMessage());
                 skippedByRateLimitCount.incrementAndGet();
                 itemProcessingErrors.add(String.format("Item '%s': Rate limited - %s", itemDetail.sourcePath, rnp.getMessage()));
             } catch (Exception e) {
                 logger.error("Error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataStoreId, itemDetail.sourcePath, e.getMessage(), e);
+                saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", e.getMessage());
                 failureCount.incrementAndGet();
                 itemProcessingErrors.add(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
             }
@@ -238,6 +240,46 @@ public class EnrichmentPipelineService {
         }
         enrichedElement.setStatus(elementStatus);
         enrichedContentElementRepository.save(enrichedElement);
+    }
+
+    private void saveErrorEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry, String status, String errorMessage) {
+        EnrichedContentElement errorElement = new EnrichedContentElement();
+        errorElement.setCleansedDataId(parentEntry.getId());
+        errorElement.setVersion(parentEntry.getVersion());
+        errorElement.setSourceUri(parentEntry.getSourceUri());
+        errorElement.setItemSourcePath(itemDetail.sourcePath);
+        errorElement.setItemOriginalFieldName(itemDetail.originalFieldName);
+        errorElement.setItemModelHint(itemDetail.model);
+        errorElement.setCleansedText(itemDetail.cleansedContent);
+        errorElement.setEnrichedAt(OffsetDateTime.now());
+        errorElement.setStatus(status);
+
+        // Set enrichment fields to error defaults
+        errorElement.setSummary("Error: Enrichment failed.");
+        errorElement.setSentiment("unknown");
+        errorElement.setClassification("unknown");
+        errorElement.setKeywords(Collections.singletonList("error"));
+        errorElement.setTags(Collections.singletonList("error"));
+        errorElement.setBedrockModelUsed(bedrockEnrichmentService.getConfiguredModelId());
+
+        // Also save the context for the error record
+        if (itemDetail.context != null) {
+            Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            errorElement.setContext(contextMap);
+        }
+
+        // Store the error message in the metadata field
+        Map<String, Object> bedrockMeta = new HashMap<>();
+        bedrockMeta.put("enrichmentError", errorMessage);
+        try {
+            errorElement.setEnrichmentMetadata(objectMapper.writeValueAsString(bedrockMeta));
+        } catch (JsonProcessingException e) {
+            logger.error("Error serializing error message for item path {}: {}", itemDetail.sourcePath, e.getMessage());
+            errorElement.setEnrichmentMetadata("{\"error\":\"Could not serialize error message\"}");
+        }
+
+        enrichedContentElementRepository.save(errorElement);
+        logger.info("Saved error record for item path '{}' with status {}", itemDetail.sourcePath, status);
     }
 
     private List<String> extractList(Map<String, Object> map, String key, String sourcePath) {
