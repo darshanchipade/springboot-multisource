@@ -34,14 +34,14 @@ public class DataIngestionService {
     private final RawDataStoreRepository rawDataStoreRepository;
     private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
+    private static final String USAGE_REF_DELIM = " ::ref:: ";
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
             "valentine", "Valentine day",
             "father's day", "Fathers day",
             "tax", "Tax day",
-            "christmas", "Christmas",
-            "diwali", "Diwali"
+            "christmas", "Christmas"
     );
-    private static final String USAGE_REF_DELIM = " ::ref:: ";
+
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final ResourceLoader resourceLoader;
@@ -325,7 +325,7 @@ public class DataIngestionService {
             rootEnvelope.setUsagePath(associatedRawDataStore.getSourceUri());
             rootEnvelope.setProvenance(new HashMap<>());
 
-            findAndExtractRecursive(rootNode, rootEnvelope, new Facets(), allExtractedItems);
+            findAndExtractRecursive(rootNode, "#", rootEnvelope, new Facets(), allExtractedItems);
 
             List<Map<String, Object>> itemsToProcess = filterForChangedItems(allExtractedItems);
 
@@ -380,7 +380,7 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(cleansedDataStore);
     }
 
-    private void findAndExtractRecursive(JsonNode currentNode, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
+    private void findAndExtractRecursive(JsonNode currentNode, String parentFieldName, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
         if (currentNode.isObject()) {
             Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
             Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
@@ -416,14 +416,16 @@ public class DataIngestionService {
                 if (CONTENT_FIELD_KEYS.contains(fieldKey)) {
                     if (fieldValue.isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
-                        processContentField(fieldValue.asText(), fieldKey, currentEnvelope, currentFacets, results);
+                        // If the key is "copy", use the parent's name. Otherwise, use the key itself.
+                        String effectiveFieldName = fieldKey.equals("copy") ? parentFieldName : fieldKey;
+                        processContentField(fieldValue.asText(), effectiveFieldName, currentEnvelope, currentFacets, results);
                     } else if (fieldValue.isObject() && fieldValue.has("copy") && fieldValue.get("copy").isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
-                        // This is a nested content fragment. Use the outer envelope.
+                        // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
                     } else {
                         currentEnvelope.setUsagePath(usagePath);
-                        findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
+                        findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
                     }
                 } else if (fieldKey.toLowerCase().contains("analytics")) {
                     try {
@@ -435,7 +437,7 @@ public class DataIngestionService {
                     }
                 } else if (fieldValue.isObject() || fieldValue.isArray()) {
                     currentEnvelope.setUsagePath(usagePath);
-                    findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
+                    findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
                 }
             });
         } else if (currentNode.isArray()) {
@@ -444,7 +446,8 @@ public class DataIngestionService {
                 Facets newFacets = new Facets();
                 newFacets.putAll(parentFacets);
                 newFacets.put("sectionIndex", String.valueOf(i));
-                findAndExtractRecursive(arrayElement, parentEnvelope, newFacets, results);
+                // When recursing into an array, the parent field name is the one that pointed to the array
+                findAndExtractRecursive(arrayElement, parentFieldName, parentEnvelope, newFacets, results);
             }
         }
     }
