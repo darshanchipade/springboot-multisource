@@ -30,4 +30,8 @@ public class Envelope {
 
     @JsonProperty("provenance")
     private Map<String, String> provenance;
+
+    @JsonProperty("sectionName")
+    private String sectionName;
+
 }

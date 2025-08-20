@@ -26,6 +26,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
+
 @Service
 public class DataIngestionService {
 
@@ -34,6 +35,12 @@ public class DataIngestionService {
     private final RawDataStoreRepository rawDataStoreRepository;
     private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer", "analytics");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("/([a-z]{2}_[A-Z]{2})/");
+    private static final Map<String, String> EVENT_KEYWORDS = Map.of(
+            "valentine", "Valentine day",
+            "father's day", "Fathers day",
+            "tax", "Tax day",
+            "christmas", "Christmas"
+    );
 
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
@@ -42,7 +49,6 @@ public class DataIngestionService {
     private final S3StorageService s3StorageService;
     private final String defaultS3BucketName;
     private final ContentHashRepository contentHashRepository;
-    private final ContextUpdateService contextUpdateService;
 
     /**
      * Constructs the service with required repositories and config values.
@@ -59,7 +65,6 @@ public class DataIngestionService {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.contentHashRepository = contentHashRepository;
-        this.contextUpdateService = contextUpdateService;
         this.objectMapper = objectMapper;
         this.resourceLoader = resourceLoader;
         this.jsonFilePath = jsonFilePath;
@@ -124,7 +129,7 @@ public class DataIngestionService {
             rawData.setStatus("FILE_PROCESSING_ERROR");
             rawData.setRawContentText("Error processing file: " + e.getMessage());
             rawDataStoreRepository.save(rawData);
-            return createAndSaveErrorCleansedDataStore(rawData, "FILE_ERROR", "ERROR FROM FILE","FileProcessingError: " + e.getMessage());
+            return createAndSaveErrorCleansedDataStore(rawData, "FILE_ERROR","FileProcessingError: ");
         }
     }
 
@@ -166,7 +171,7 @@ public class DataIngestionService {
                     logger.warn("File not found or content is null from S3 URI: {}.", sourceUriForDb);
                     rawDataStore.setStatus("S3_FILE_NOT_FOUND_OR_EMPTY");
                     rawDataStoreRepository.save(rawDataStore);
-                    return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_FILE_NOT_FOUND_OR_EMPTY", "S3 ERROR", "S3Error: File not found or content was null at " + sourceUriForDb);
+                    return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_FILE_NOT_FOUND_OR_EMPTY",  "S3Error: File not found or content was null at " + sourceUriForDb);
                 }
                 logger.info("Successfully downloaded content from S3 URI: {}", sourceUriForDb);
                 rawDataStore.setStatus("S3_CONTENT_RECEIVED");
@@ -175,13 +180,13 @@ public class DataIngestionService {
                 rawDataStore.setStatus("INVALID_S3_URI");
                 rawDataStore.setRawContentText("Invalid S3 URI: " + e.getMessage());
                 rawDataStoreRepository.save(rawDataStore);
-                return createAndSaveErrorCleansedDataStore(rawDataStore, "INVALID_S3_URI","INVALID S3", "InvalidS3URI: " + e.getMessage());
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "INVALID_S3_URI", "InvalidS3URI: " + e.getMessage());
             } catch (Exception e) {
                 logger.error("Failed to download S3 content for URI: '{}'. Error: {}", sourceUriForDb, e.getMessage(), e);
                 rawDataStore.setStatus("S3_DOWNLOAD_FAILED");
                 rawDataStore.setRawContentText("Error fetching S3 content: " + e.getMessage());
                 rawDataStoreRepository.save(rawDataStore);
-                return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_DOWNLOAD_FAILED", "S3ERROR","S3DownloadError: " + e.getMessage());
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "S3_DOWNLOAD_FAILED", "S3DownloadError: " + e.getMessage());
             }
         } else {
             sourceUriForDb = identifier.startsWith("classpath:") ? identifier : "classpath:" + identifier;
@@ -193,7 +198,7 @@ public class DataIngestionService {
                 logger.error("Classpath resource not found: {}", sourceUriForDb);
                 rawDataStore.setStatus("CLASSPATH_FILE_NOT_FOUND");
                 rawDataStoreRepository.save(rawDataStore);
-                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_FILE_NOT_FOUND", "FILE NOT FOUND","ClasspathError: File not found at " + sourceUriForDb);
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_FILE_NOT_FOUND", "ClasspathError: File not found at " + sourceUriForDb);
             }
             try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
                 rawJsonContent = FileCopyUtils.copyToString(reader);
@@ -202,7 +207,7 @@ public class DataIngestionService {
                 rawDataStore.setStatus("CLASSPATH_READ_ERROR");
                 rawDataStore.setRawContentText("Error reading classpath file: " + e.getMessage());
                 rawDataStoreRepository.save(rawDataStore);
-                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_READ_ERROR", "READ ERROR","IOError: " + e.getMessage());
+                return createAndSaveErrorCleansedDataStore(rawDataStore, "CLASSPATH_READ_ERROR", "IOError: " + e.getMessage());
             }
             try{
                 JsonNode rootNode = objectMapper.readTree(rawJsonContent);
@@ -221,7 +226,7 @@ public class DataIngestionService {
             rawDataStore.setRawContentText(rawJsonContent);
             rawDataStore.setStatus("EMPTY_CONTENT_LOADED");
             RawDataStore savedForEmpty = rawDataStoreRepository.save(rawDataStore);
-            return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
+            return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED" ,"ContentError: Loaded content was empty.");
         }
         String contextJson = null;
         try {
@@ -333,7 +338,7 @@ public class DataIngestionService {
             logger.error("Error during content processing for raw data ID: {}. Error: {}", associatedRawDataStore.getId(), e.getMessage(), e);
             associatedRawDataStore.setStatus("EXTRACTION_ERROR");
             rawDataStoreRepository.save(associatedRawDataStore);
-            return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "ExtractionError: " + e.getMessage(),"Failed");
+            return createAndSaveErrorCleansedDataStore(associatedRawDataStore, "EXTRACTION_FAILED", "ExtractionError: " + e.getMessage());
         }
     }
 
@@ -373,26 +378,55 @@ public class DataIngestionService {
 
     private void findAndExtractRecursive(JsonNode currentNode, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
         if (currentNode.isObject()) {
-            Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
-            Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
+            Facets currentFacets = new Facets(parentFacets);
 
+            currentNode.fields().forEachRemaining(entry -> {
+                if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
+                    currentFacets.put(entry.getKey(), entry.getValue().asText());
+                }
+            });
+
+            Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
+            String model = currentEnvelope.getModel();
+            if (model != null && model.endsWith("-section")) {
+                currentFacets.put("sectionModel", model);
+                currentFacets.put("sectionModelName", currentNode.path("_modelname").asText());
+                currentFacets.put("sectionPath", currentEnvelope.getSourcePath());
+                currentFacets.put("sectionKey", currentEnvelope.getSectionName());
+            }
+
+            final int[] sectionIndex = {0};
             currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
                 JsonNode fieldValue = entry.getValue();
 
-                if (CONTENT_FIELD_KEYS.contains(fieldKey) && fieldValue.isTextual()) {
-                    processContentField(fieldValue.asText(), fieldKey, currentEnvelope, currentFacets, results);
-                } else if (fieldValue.isObject() || fieldValue.isArray()) {
-                    findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
+                if (fieldKey.equals("copy") && fieldValue.isTextual()) {
+                    processContentField(fieldValue.asText(), fieldKey, new Facets(currentFacets), results);
+                } else if (fieldKey.equals("analyticsAttributes") && fieldValue.isArray()) {
+                    for (JsonNode analyticsNode : fieldValue) {
+                        if ("analytics".equals(analyticsNode.path("_model").asText())) {
+                            processContentField(analyticsNode.path("value").asText(), "analytics", new Facets(currentFacets), results);
+                        }
+                    }
+                } else if (fieldValue.isObject()) {
+                    findAndExtractRecursive(fieldValue, currentEnvelope, new Facets(currentFacets), results);
+                } else if (fieldValue.isArray()) {
+                    if (fieldKey.equals("sections")) {
+                        fieldValue.forEach(node -> {
+                            Facets indexedFacets = new Facets(currentFacets);
+                            indexedFacets.put("sectionIndex", sectionIndex[0]++);
+                            findAndExtractRecursive(node, currentEnvelope, indexedFacets, results);
+                        });
+                    } else {
+                        fieldValue.forEach(node -> findAndExtractRecursive(node, currentEnvelope, new Facets(currentFacets), results));
+                    }
                 }
             });
+
         } else if (currentNode.isArray()) {
-            for (JsonNode node : currentNode) {
-                findAndExtractRecursive(node, parentEnvelope, parentFacets, results);
-            }
+            currentNode.forEach(node -> findAndExtractRecursive(node, parentEnvelope, parentFacets, results));
         }
     }
-
 
     private Envelope buildCurrentEnvelope(JsonNode currentNode, Envelope parentEnvelope) {
         Envelope currentEnvelope = new Envelope();
@@ -424,42 +458,49 @@ public class DataIngestionService {
                     currentEnvelope.setCountry(parts[1]);
                 }
             }
+            List<String> pathSegments = Arrays.asList(path.split("/"));
+            currentEnvelope.setPathHierarchy(pathSegments);
+            if (!pathSegments.isEmpty()) {
+                currentEnvelope.setSectionName(pathSegments.get(pathSegments.size() - 1));
+            }
             currentEnvelope.setPathHierarchy(Arrays.asList(path.split("/")));
         }
         return currentEnvelope;
     }
 
-    private Facets buildCurrentFacets(JsonNode currentNode, Facets parentFacets) {
-        Facets currentFacets = new Facets();
-        currentFacets.putAll(parentFacets);
-        currentFacets.remove("copy"); // Remove generic copy if it exists
-        currentNode.fields().forEachRemaining(entry -> {
-            if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
-                currentFacets.put(entry.getKey(), entry.getValue().asText());
-            }
-        });
-        return currentFacets;
-    }
-
-    private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results) {
+    private void processContentField(String content, String fieldKey, Facets facets, List<Map<String, Object>> results) {
         String cleansedContent = cleanseCopyText(content);
-        if (cleansedContent != null && !cleansedContent.isBlank()) {
-            EnrichmentContext finalContext = new EnrichmentContext(envelope, facets);
-            Map<String, Object> item = new HashMap<>();
-            item.put("sourcePath", envelope.getSourcePath());
-            item.put("itemType", fieldKey);
-            item.put("originalFieldName", fieldKey);
-            item.put("model", envelope.getModel());
-            item.put("cleansedContent", cleansedContent);
-            item.put("contentHash", calculateContentHash(cleansedContent, null));
-            try {
-                item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
-                item.put("contextHash", calculateContentHash(objectMapper.writeValueAsString(finalContext), null));
-            } catch (JsonProcessingException e) {
-                logger.error("Failed to process context for hashing", e);
+        if (cleansedContent == null || cleansedContent.isBlank()) return;
+
+        facets.put("originalCopy", content);
+
+        String lowerCaseContent = cleansedContent.toLowerCase();
+        for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
+            if (lowerCaseContent.contains(entry.getKey())) {
+                facets.put("eventType", entry.getValue());
+                break;
             }
-            results.add(item);
         }
+
+        Envelope envelope = new Envelope();
+        envelope.setSourcePath(envelope.getSourcePath());
+        // ... populate other envelope fields from facets ...
+
+        EnrichmentContext finalContext = new EnrichmentContext(envelope, facets);
+        Map<String, Object> item = new HashMap<>();
+        item.put("sourcePath", envelope.getSourcePath());
+        item.put("itemType", fieldKey);
+        item.put("originalFieldName", fieldKey);
+        item.put("model", envelope.getModel());
+        item.put("cleansedContent", cleansedContent);
+        item.put("contentHash", calculateContentHash(cleansedContent, null));
+        try {
+            item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
+            item.put("contextHash", calculateContentHash(objectMapper.writeValueAsString(finalContext), null));
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to process context for hashing", e);
+        }
+        results.add(item);
     }
 
     private String calculateContentHash(String content, String context) {
@@ -487,7 +528,7 @@ public class DataIngestionService {
         return hexString.toString();
     }
 
-    private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorMessage, String specificErrorMessage) {
+    private CleansedDataStore createAndSaveErrorCleansedDataStore(RawDataStore rawDataStore, String cleansedStatus, String errorMessage) {
         CleansedDataStore errorCleansedData = new CleansedDataStore();
         if (rawDataStore != null) {
             errorCleansedData.setRawDataId(rawDataStore.getId());
@@ -504,7 +545,7 @@ public class DataIngestionService {
         if (text == null) return null;
         String cleansed = text.replaceAll("\\{%.*?%\\}", " ");
         cleansed = cleansed.replaceAll("<[^>]+?>", " ");
-        cleansed = cleansed.replaceAll("\s+", " ").trim();
+        cleansed = cleansed.replaceAll("\\s+", " ").trim();
         return cleansed;
     }
 }
