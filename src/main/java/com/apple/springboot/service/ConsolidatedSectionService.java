@@ -13,6 +13,7 @@ import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ConsolidatedSectionService {
@@ -22,6 +23,8 @@ public class ConsolidatedSectionService {
     private final EnrichedContentElementRepository enrichedRepo;
     private final ConsolidatedEnrichedSectionRepository consolidatedRepo;
     private final ContentHashRepository contentHashRepository;
+    // Delimiter used when composing usagePath: "<container> ::ref:: <fragment>"
+    private static final String USAGE_REF_DELIM = " ::ref:: ";
 
 
     public ConsolidatedSectionService(EnrichedContentElementRepository enrichedRepo,
@@ -42,6 +45,16 @@ public class ConsolidatedSectionService {
                 return;
             }
 
+            // --- NEW: derive sectionPath (container) & sectionUri (fragment) from usagePath ---
+            String usagePath = extractUsagePath(item); // may be "container ::ref:: fragment" or just a single path
+            String[] split = splitUsagePath(usagePath);
+            String sectionPath = split[0];   // container/placement
+            String sectionUri  = split[1];   // fragment/canonical (where the copy lives)
+
+            // Fallbacks if needed (should not trigger if usagePath was set during extraction)
+            if (sectionPath == null) sectionPath = item.getItemSourcePath();
+            if (sectionUri  == null) sectionUri  = item.getItemSourcePath();
+
             boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedTextAndVersion(
                     item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText(), cleansedData.getVersion());
 
@@ -49,8 +62,9 @@ public class ConsolidatedSectionService {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
                 section.setCleansedDataId(cleansedData.getId());
                 section.setVersion(cleansedData.getVersion());
-                section.setSourceUri(item.getSourceUri());
-                section.setSectionPath(item.getItemSourcePath());
+                section.setSourceUri(item.getSourceUri());           // file/source that produced this
+                section.setSectionPath(sectionPath);                 // container
+                section.setSectionUri(sectionUri);                  // fragment
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
                 section.setCleansedText(item.getCleansedText());
                 contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
@@ -73,7 +87,7 @@ public class ConsolidatedSectionService {
                 section.setModelUsed(item.getBedrockModelUsed());
                 section.setEnrichmentMetadata(item.getEnrichmentMetadata());
                 section.setEnrichedAt(item.getEnrichedAt());
-                section.setSectionUri(item.getItemSourcePath());
+                //section.setSectionUri(item.getSourceUri());
                 section.setContext(item.getContext());
                 section.setSavedAt(OffsetDateTime.now());
                 section.setStatus(item.getStatus());
@@ -84,5 +98,33 @@ public class ConsolidatedSectionService {
                 logger.info("ConsolidatedEnrichedSection already exists for itemSourcePath '{}' and cleansedText snippet. Skipping save.", item.getItemSourcePath());
             }
         });
+    }
+    @SuppressWarnings("unchecked")
+    private String extractUsagePath(EnrichedContentElement item) {
+        Map<String, Object> ctx = item.getContext();
+        if (ctx != null) {
+            Object envObj = ctx.get("envelope");
+            if (envObj instanceof Map<?, ?> env) {
+                Object up = env.get("usagePath");
+                if (up instanceof String s && !s.isBlank()) {
+                    return s;
+                }
+            }
+        }
+        return item.getItemSourcePath();
+    }
+
+    /**
+     * Splits "<container> ::ref:: <fragment>" into [container, fragment].
+     * If no delimiter is present, returns [path, path].
+     * If input is null/blank, returns [null, null].
+     */
+    private String[] splitUsagePath(String usagePath) {
+        if (usagePath == null || usagePath.isBlank()) return new String[]{null, null};
+        int idx = usagePath.indexOf(USAGE_REF_DELIM);
+        if (idx < 0) return new String[]{usagePath, usagePath};
+        String left = usagePath.substring(0, idx).trim();
+        String right = usagePath.substring(idx + USAGE_REF_DELIM.length()).trim();
+        return new String[]{left.isEmpty() ? null : left, right.isEmpty() ? null : right};
     }
 }

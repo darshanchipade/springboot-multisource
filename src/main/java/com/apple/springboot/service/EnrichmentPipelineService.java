@@ -109,7 +109,7 @@ public class EnrichmentPipelineService {
                     throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
                 }
 
-                // **THE FIX IS HERE**: Restore the logic to add required metadata before validation.
+                // Restore the logic to add required metadata before validation.
                 Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
                 String fullContextId = itemDetail.sourcePath + "::" + itemDetail.originalFieldName;
                 contextMap.put("fullContextId", fullContextId);
@@ -183,6 +183,16 @@ public class EnrichmentPipelineService {
         enrichedElement.setTags((List<String>) standardEnrichments.get("tags"));
         enrichedElement.setBedrockModelUsed((String) bedrockResponse.get("enrichedWithModel"));
         enrichedElement.setStatus(elementStatus);
+        // Create and set the enrichment metadata
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("enrichedWithModel", bedrockResponse.get("enrichedWithModel"));
+        metadata.put("enrichmentTimestamp", enrichedElement.getEnrichedAt().toString());
+        try {
+            enrichedElement.setEnrichmentMetadata(objectMapper.writeValueAsString(metadata));
+        } catch (JsonProcessingException e) {
+            logger.warn("Could not serialize enrichment metadata for item path: {}", itemDetail.sourcePath, e);
+            enrichedElement.setEnrichmentMetadata("{\"error\":\"Could not serialize metadata\"}");
+        }
 
         enrichedContentElementRepository.save(enrichedElement);
     }

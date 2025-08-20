@@ -32,15 +32,16 @@ public class DataIngestionService {
     private static final Logger logger = LoggerFactory.getLogger(DataIngestionService.class);
 
     private final RawDataStoreRepository rawDataStoreRepository;
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer", "analytics");
-    private static final Pattern LOCALE_PATTERN = Pattern.compile("/([a-z]{2}_[A-Z]{2})/");
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer");
+    private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
             "valentine", "Valentine day",
             "father's day", "Fathers day",
             "tax", "Tax day",
-            "christmas", "Christmas"
+            "christmas", "Christmas",
+            "diwali", "Diwali"
     );
-
+    private static final String USAGE_REF_DELIM = " ::ref:: ";
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
     private final ResourceLoader resourceLoader;
@@ -321,6 +322,8 @@ public class DataIngestionService {
 
             Envelope rootEnvelope = new Envelope();
             rootEnvelope.setSourcePath(associatedRawDataStore.getSourceUri());
+            rootEnvelope.setUsagePath(associatedRawDataStore.getSourceUri());
+            rootEnvelope.setProvenance(new HashMap<>());
 
             findAndExtractRecursive(rootNode, rootEnvelope, new Facets(), allExtractedItems);
 
@@ -382,29 +385,66 @@ public class DataIngestionService {
             Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
             Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
 
-            currentNode.fields().forEachRemaining(entry -> {
-                if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
-                    currentFacets.put(entry.getKey(), entry.getValue().asText());
+            // Section detection logic
+            String modelName = currentEnvelope.getModel();
+            if (modelName != null && modelName.endsWith("-section")) {
+                String sectionPath = currentEnvelope.getSourcePath();
+                currentFacets.put("sectionModel", modelName);
+                currentFacets.put("sectionPath", sectionPath);
+
+                if (sectionPath != null) {
+                    String[] pathParts = sectionPath.split("/");
+                    if (pathParts.length > 0) {
+                        currentFacets.put("sectionKey", pathParts[pathParts.length - 1]);
+                    }
                 }
-            });
+            }
+
             currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
                 JsonNode fieldValue = entry.getValue();
+                String fragmentPath = currentEnvelope.getSourcePath();
+                String containerPath = (parentEnvelope != null
+                        && parentEnvelope.getSourcePath() != null
+                        && !parentEnvelope.getSourcePath().equals(fragmentPath))
+                        ? parentEnvelope.getSourcePath()
+                        : null;
+                String usagePath = (containerPath != null)
+                        ? containerPath + USAGE_REF_DELIM + fragmentPath
+                        : fragmentPath;
 
-
-
-                if (CONTENT_FIELD_KEYS.contains(fieldKey) && fieldValue.isTextual()) {
-                    processContentField(fieldValue.asText(), fieldKey, currentEnvelope, currentFacets, results);
+                if (CONTENT_FIELD_KEYS.contains(fieldKey)) {
+                    if (fieldValue.isTextual()) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(fieldValue.asText(), fieldKey, currentEnvelope, currentFacets, results);
+                    } else if (fieldValue.isObject() && fieldValue.has("copy") && fieldValue.get("copy").isTextual()) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        // This is a nested content fragment. Use the outer envelope.
+                        processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
+                    } else {
+                        currentEnvelope.setUsagePath(usagePath);
+                        findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
+                    }
+                } else if (fieldKey.toLowerCase().contains("analytics")) {
+                    try {
+                        String analyticsJson = objectMapper.writeValueAsString(fieldValue);
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(analyticsJson, fieldKey, currentEnvelope, currentFacets, results);
+                    } catch (JsonProcessingException e) {
+                        logger.error("Failed to serialize analytics object to JSON for field: {}", fieldKey, e);
+                    }
                 } else if (fieldValue.isObject() || fieldValue.isArray()) {
+                    currentEnvelope.setUsagePath(usagePath);
                     findAndExtractRecursive(fieldValue, currentEnvelope, currentFacets, results);
                 }
             });
         } else if (currentNode.isArray()) {
-//            for (JsonNode node : currentNode) {
-//                findAndExtractRecursive(node, parentEnvelope, parentFacets, results);
-//            }
             for (int i = 0; i < currentNode.size(); i++) {
-                findAndExtractRecursive(currentNode.get(i), parentEnvelope, parentFacets, results);
+                JsonNode arrayElement = currentNode.get(i);
+                Facets newFacets = new Facets();
+                newFacets.putAll(parentFacets);
+                newFacets.put("sectionIndex", String.valueOf(i));
+                findAndExtractRecursive(arrayElement, parentEnvelope, newFacets, results);
             }
         }
     }
@@ -431,14 +471,14 @@ public class DataIngestionService {
 
         if (path != null) {
             Matcher matcher = LOCALE_PATTERN.matcher(path);
+            //cover /en_US/, /en_US, /en-US/, and /en-US.
             if (matcher.find()) {
-                String locale = matcher.group(1);
+                String language = matcher.group(1);         // "en"
+                String country  = matcher.group(2);         // "US"
+                String locale   = language + "_" + country;
                 currentEnvelope.setLocale(locale);
-                String[] parts = locale.split("_");
-                if (parts.length == 2) {
-                    currentEnvelope.setLanguage(parts[0]);
-                    currentEnvelope.setCountry(parts[1]);
-                }
+                currentEnvelope.setLanguage(language);
+                currentEnvelope.setCountry(country);
             }
             List<String> pathSegments = Arrays.asList(path.split("/"));
             currentEnvelope.setPathHierarchy(pathSegments);

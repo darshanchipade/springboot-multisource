@@ -70,7 +70,7 @@ public class BedrockEnrichmentService {
         String promptTemplate =
                 "Human: You are an expert content analyst AI. Your task is to analyze a piece of text and provide a set of standard content enrichments. " +
                         "You will be given the text itself in a <content> tag, and a rich JSON object providing the context of where this content lives in a <context> tag.\n\n" +
-                        "Use the metadata in the <context> object, such as the `pathHierarchy` and `facets`, to generate more accurate and relevant enrichments.\n\n" +
+                        "Use the metadata in the <context> object, such as the 'pathHierarchy' and `facets`, to generate more accurate and relevant enrichments.\n\n" +
                         "Please provide a single, valid JSON object as your response with no extra commentary. " +
                         "The response JSON should have one top-level key: \"standardEnrichments\".\n\n" +
                         "The `standardEnrichments` object must contain the following keys:\n" +
