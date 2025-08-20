@@ -1,0 +1,20 @@
+{
+  "_model": "page-section",
+  "_path": "/content/dam/applecom-cms/live/en_US/ipad/page-section",
+  "analyticsTrack": {
+    "copy": "test-analytics-copy"
+  },
+  "sections": [
+    {
+      "_model": "feature-section",
+      "_path": "/content/dam/applecom-cms/live/en_US/ipad/feature-section",
+      "copy": "section 1 copy",
+      "analytics": "section 1 analytics"
+    },
+    {
+      "_model": "another-section",
+      "_path": "/content/dam/applecom-cms/live/en_US/ipad/another-section",
+      "disclaimer": "section 2 disclaimer"
+    }
+  ]
+}

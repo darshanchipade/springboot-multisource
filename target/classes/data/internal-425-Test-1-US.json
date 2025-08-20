@@ -1,0 +1,61 @@
+{
+  "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/shared/product-tiles/ipad-pro-items/tout-column-items/ai-attribute",
+  "_modelname": "ProductModelAttributeModel",
+  "_model": "product-model-attribute",
+  "featureName": "Apple Intelligence",
+  "featureCopy": {
+    "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/tout-table/feature-ai",
+    "_model": "markdown-inline-copy",
+    "textType": "markdown",
+    "metadata": [],
+    "_id": "baecc9a902f5d9adb84f2f59fc2f0805255da6758ced0e91a44a7c67e9fac8c8",
+    "copy": "Throttling -7 test-Enrichment Apple{%nbsp%}Intelligence",
+    "_meta": []
+  },
+  "attributeItem": {
+    "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/shared/product-tiles/ipad-pro-items/tout-column-items/ai-tout-attribute",
+    "_model": "tout-attribute",
+    "type": "glyph",
+    "captionBottom": [
+      {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/tout-table/ai-caption",
+        "_model": "markdown-inline-copy",
+        "textType": "markdown",
+        "metadata": [
+          "875112dba4be34da293222a6d1758cac7f8156d6a46a21a06d022366cf014a4f"
+        ],
+        "_id": "b5113b4f97810b7c4fe96ea152a7f5441e2a728f4f24cdac92866e15d2673c8a",
+        "copy": "Throttling -7 test TESTING TESTING Apple{%nbsp%}Intelligence{%sosumi type=\"numbered\" metadata=\"1\"%}",
+        "_meta": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/legal/tech-specs-and-features/apple-intelligence/ai-availability",
+            "_model": "markdown-inline-copy",
+            "categories": [
+              "legal"
+            ],
+            "textType": "markdown",
+            "metadata": [],
+            "_id": "875112dba4be34da293222a6d1758cac7f8156d6a46a21a06d022366cf014a4f",
+            "copy": "Throttling -7 Apple Intelligence is available in beta on iPad{%nbsp%}mini (A17{%nbsp%}Pro) and iPad models with M1 and later, with Siri and device language set to English (Australia, Canada, Ireland, New Zealand, South Africa, UK, or U.S.), as an iPadOS{%nbsp%}18 update. Additional features and Chinese (Simplified), English (India, Singapore), French, German, Italian, Japanese, Korean, Portuguese (Brazil), and Spanish language support available in early April, with more languages coming over the course of the year, including Vietnamese. Some features may not be available in all regions or languages."
+          }
+        ]
+      }
+    ],
+    "icon": {
+      "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/shared/product-tiles/ipad-pro-items/tout-column-items/ai-asset-set",
+      "_model": "asset-set",
+      "viewportSmall": {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/shared/svg-images/glyphs/apple-intelligence",
+        "_model": "inert-svg-image",
+        "uri": "/assets-www/en_WW/ipad/tout_table/small/apple.intelligence_elevated_f063342ae.svg",
+        "_id": "e5a9f9a749af384f7b333b165788e81f85daf5b651ade212e5f464cb6e114d73",
+        "_uri_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/tout_table/small/apple.intelligence_elevated.svg",
+        "width": 42,
+        "height": 56
+      },
+      "_id": "57bba8c1792d61e99c2187076d401c76282cb939e69edff37cdcfc9e4c85e811"
+    },
+    "_id": "ae74c1708e0b4d3e912d033c0a040ae8dfb3b3791a925d66d0a955ffe0d6d73d"
+  },
+  "_id": "e0ebb71443f434a56d899e776cb1544d143be06d4eea0e37f8686acfb406b74a"
+}
