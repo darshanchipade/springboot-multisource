@@ -321,6 +321,8 @@ public class DataIngestionService {
 
             Envelope rootEnvelope = new Envelope();
             rootEnvelope.setSourcePath(associatedRawDataStore.getSourceUri());
+            rootEnvelope.setUsagePath(associatedRawDataStore.getSourceUri());
+            rootEnvelope.setProvenance(new HashMap<>());
 
             findAndExtractRecursive(rootNode, rootEnvelope, new Facets(), allExtractedItems);
 
