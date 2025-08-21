@@ -23,6 +23,8 @@ import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.BedrockRuntimeException;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
+
+import java.io.IOException;
 import java.util.*;
 import java.util.Map;
 
@@ -35,14 +37,17 @@ public class BedrockEnrichmentService {
     private final ObjectMapper objectMapper;
     private final String bedrockModelId; // Store the model ID
     private final String bedrockRegion; // Store the region
+    private final String embeddingModelId;
 
     @Autowired
     public BedrockEnrichmentService(ObjectMapper objectMapper,
                                     @Value("${aws.region}") String region,
-                                    @Value("${aws.bedrock.modelId}") String modelId) {
+                                    @Value("${aws.bedrock.modelId}") String modelId,
+                                    @Value("${aws.bedrock.embeddingModelId}") String embeddingModelId) {
         this.objectMapper = objectMapper;
         this.bedrockRegion = region;     // Store the injected region
         this.bedrockModelId = modelId;  // Store the injected model ID
+        this.embeddingModelId = embeddingModelId;
 
         if (region == null) {
             // This check is more for robustness, Spring should prevent null for @Value resolved params
@@ -62,9 +67,35 @@ public class BedrockEnrichmentService {
         return this.bedrockModelId;
     }
 
+    public float[] generateEmbedding(String text) throws IOException {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("inputText", text);
+
+        String payloadJson = objectMapper.writeValueAsString(payload);
+        SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
+
+        InvokeModelRequest request = InvokeModelRequest.builder()
+                .modelId(embeddingModelId)
+                .contentType("application/json")
+                .accept("application/json")
+                .body(body)
+                .build();
+
+        InvokeModelResponse response = bedrockClient.invokeModel(request);
+        JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
+        JsonNode embeddingNode = responseJson.get("embedding");
+        float[] embedding = new float[embeddingNode.size()];
+        for (int i = 0; i < embeddingNode.size(); i++) {
+            embedding[i] = embeddingNode.get(i).floatValue();
+        }
+        return embedding;
+    }
+
     private String createEnrichmentPrompt(JsonNode itemContent, EnrichmentContext context) throws JsonProcessingException {
         String cleansedContent = itemContent.path("cleansedContent").asText("");
         String contextJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(context);
+
+
 
         // New, more detailed prompt template
         String promptTemplate =
@@ -97,6 +128,9 @@ public class BedrockEnrichmentService {
         results.put("enrichedWithModel", effectiveModelId);
 
         try {
+            String textToEnrich = itemContent.path("cleansedContent").asText("");
+            float[] embedding = generateEmbedding(textToEnrich);
+            results.put("vector", embedding);
             String prompt = createEnrichmentPrompt(itemContent, context);
 
             ObjectNode payload = objectMapper.createObjectNode();
@@ -132,7 +166,7 @@ public class BedrockEnrichmentService {
                 if (textContent.startsWith("{") && textContent.endsWith("}")) {
                     try {
                         // The entire response is the result map
-                       // return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
+                        // return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
                         Map<String, Object> aiResults = objectMapper.readValue(textContent, new TypeReference<>() {});
                         aiResults.put("enrichedWithModel", effectiveModelId);
                         return aiResults;

@@ -2,6 +2,7 @@ package com.apple.springboot.service;
 
 import com.apple.springboot.model.*;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
+import com.apple.springboot.repository.ContentChunkRepository;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -28,7 +29,8 @@ public class EnrichmentPipelineService {
     private final ObjectMapper objectMapper;
     private final ConsolidatedSectionService consolidatedSectionService;
     private final AIResponseValidator aiResponseValidator;
-
+    private final TextChunkingService textChunkingService;
+    private final ContentChunkRepository contentChunkRepository;
     private static class CleansedItemDetail {
         public final String sourcePath;
         public final String originalFieldName;
@@ -50,13 +52,17 @@ public class EnrichmentPipelineService {
                                      CleansedDataStoreRepository cleansedDataStoreRepository,
                                      ObjectMapper objectMapper,
                                      ConsolidatedSectionService consolidatedSectionService,
-                                     AIResponseValidator aiResponseValidator) {
+                                     AIResponseValidator aiResponseValidator,
+                                     TextChunkingService textChunkingService,
+                                     ContentChunkRepository contentChunkRepository) {
         this.bedrockEnrichmentService = bedrockEnrichmentService;
         this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
         this.consolidatedSectionService = consolidatedSectionService;
         this.aiResponseValidator = aiResponseValidator;
+        this.textChunkingService = textChunkingService;
+        this.contentChunkRepository = contentChunkRepository;
     }
 
     @Transactional
@@ -92,6 +98,7 @@ public class EnrichmentPipelineService {
         AtomicInteger skippedByRateLimitCount = new AtomicInteger(0);
         List<String> itemProcessingErrors = new ArrayList<>();
 
+        // Step 1: Loop and enrich all elements
         for (CleansedItemDetail itemDetail : itemsToEnrich) {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
@@ -137,7 +144,34 @@ public class EnrichmentPipelineService {
                 itemProcessingErrors.add(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
             }
         }
+
+        // Step 2: Consolidate sections once after all enrichments are saved
         consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry);
+
+        // Step 3: Create content chunks once after consolidation
+        List<ConsolidatedEnrichedSection> savedSections = consolidatedSectionService.getSectionsFor(cleansedDataEntry);
+        for (ConsolidatedEnrichedSection section : savedSections) {
+            List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
+            for (String chunkText : chunks) {
+                try {
+                    float[] vector = bedrockEnrichmentService.generateEmbedding(chunkText);
+                    ContentChunk contentChunk = new ContentChunk();
+                    contentChunk.setConsolidatedEnrichedSection(section);
+                    contentChunk.setChunkText(chunkText);
+                    contentChunk.setSourceField(section.getSourceUri());
+                    contentChunk.setSectionPath(section.getSectionPath());
+                    contentChunk.setVector(vector);
+                    contentChunk.setCreatedAt(OffsetDateTime.now());
+                    contentChunk.setCreatedBy("EnrichmentPipelineService");
+                    contentChunkRepository.save(contentChunk);
+                } catch (Exception e) {
+                    logger.error("Error creating content chunk for item path {}: {}", section.getSectionPath(), e.getMessage(), e);
+                    // Log and continue to the next chunk
+                }
+            }
+        }
+
+        // Step 4: Update final status
         updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
     }
 
@@ -161,7 +195,7 @@ public class EnrichmentPipelineService {
     }
 
     private void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
-                                     Map<String, Object> bedrockResponse, String elementStatus) {
+                                     Map<String, Object> bedrockResponse, String elementStatus) throws JsonProcessingException {
         EnrichedContentElement enrichedElement = new EnrichedContentElement();
         enrichedElement.setCleansedDataId(parentEntry.getId());
         enrichedElement.setVersion(parentEntry.getVersion());

@@ -14,4 +14,10 @@ public interface ConsolidatedEnrichedSectionRepository extends JpaRepository<Con
     boolean existsBySectionUriAndSectionPathAndCleansedTextAndVersion(String sectionUri, String sectionPath, String cleansedText, Integer version);
     //boolean existsBySectionUriAndSectionPathAndCleansedText(String sectionUri, String sectionPath, String cleansedText);
     Optional<ConsolidatedEnrichedSection> findBySectionPathAndOriginalFieldName(String sectionPath, String originalFieldName);
+
+    Optional<ConsolidatedEnrichedSection> findBySourceUriAndVersionAndSectionPath(String sourceUri, Integer version, String sectionPath);
+
+    List<ConsolidatedEnrichedSection> findAllByCleansedDataId(UUID cleansedDataId);
+
+    List<ConsolidatedEnrichedSection> findAllByCleansedDataIdAndVersion(UUID cleansedDataId, Integer version);
 }
