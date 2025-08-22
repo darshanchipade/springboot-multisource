@@ -310,6 +310,7 @@ public class DataIngestionService {
             rawDataStore.setReceivedAt(OffsetDateTime.now());
             rawDataStore.setRawContentText(jsonPayload);
             rawDataStore.setContentHash(newContentHash);
+            rawDataStore.setStatus("API_PAYLOAD_RECEIVED");
             logger.info("No existing RawDataStore found for sourceIdentifier {}. Creating a new one.", sourceIdentifier);
             return rawDataStoreRepository.save(rawDataStore);
         }
