@@ -1,0 +1,10 @@
+type Query {
+    search(query: String!, threshold: Float = 0.8, limit: Int = 10): [ContentChunk]
+}
+
+type ContentChunk {
+    id: ID!
+    chunkText: String
+    sourceField: String
+    sectionPath: String
+}
