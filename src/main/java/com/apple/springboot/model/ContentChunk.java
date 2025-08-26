@@ -1,17 +1,15 @@
 package com.apple.springboot.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Array;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import com.yugabyte.ysql.hibernate.VectorType;
-import com.yugabyte.ysql.type.Vector;
-import org.hibernate.annotations.Type;
-
 import java.time.OffsetDateTime;
 import java.util.UUID;
-
 
 @Entity
 @Data
@@ -46,10 +44,8 @@ public class ContentChunk {
     @Column(name = "section_path")
     private String sectionPath;
 
-//    @Column(name = "vector", columnDefinition = "vector(1024)")
-//    private float[] vector;
-
-    @Type(VectorType.class)
-    @Column(name = "embedding", columnDefinition = "vector(1024)")
-    private Vector embedding;
+    @JdbcTypeCode(SqlTypes.VECTOR)
+    @Array(length = 1024)
+    @Column(name = "vector", columnDefinition = "vector(1024)")
+    private float[] vector;
 }
