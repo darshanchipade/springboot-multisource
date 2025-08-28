@@ -7,6 +7,7 @@ import java.util.List;
 public interface ContentChunkRepositoryCustom {
     List<ContentChunk> findSimilar(
             float[] embedding,
+            String original_field_name,
             String[] tags,
             String[] keywords,
             String[] contextPath,

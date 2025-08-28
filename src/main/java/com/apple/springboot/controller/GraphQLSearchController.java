@@ -21,9 +21,9 @@ public class GraphQLSearchController {
     }
 
     @QueryMapping
-    public List<ContentChunk> search(@Argument String query, @Argument Integer limit, @Argument List<String> tags, @Argument List<String> keywords, @Argument List<String> contextPath, @Argument String contextValue) throws IOException {
+    public List<ContentChunk> search(@Argument String query, @Argument String original_field_name, @Argument Integer limit, @Argument List<String> tags, @Argument List<String> keywords, @Argument List<String> contextPath, @Argument String contextValue) throws IOException {
         int limitVal = (limit != null) ? limit : 10;
         String[] contextPathArray = (contextPath != null) ? contextPath.toArray(new String[0]) : null;
-        return vectorSearchService.search(query, limitVal, tags, keywords, contextPathArray, contextValue);
+        return vectorSearchService.search(query, original_field_name, limitVal, tags, keywords, contextPathArray, contextValue);
     }
 }

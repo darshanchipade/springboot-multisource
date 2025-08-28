@@ -18,7 +18,7 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
     private EntityManager entityManager;
 
     @Override
-    public List<ContentChunk> findSimilar(float[] embedding, String[] tags, String[] keywords, String[] contextPath, String contextValue, int limit) {
+    public List<ContentChunk> findSimilar(float[] embedding, String originalFieldName,String[] tags, String[] keywords, String[] contextPath, String contextValue, int limit) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT c.* FROM content_chunks c JOIN consolidated_enriched_sections s ON c.consolidated_enriched_section_id = s.id WHERE 1=1");
 
@@ -26,6 +26,10 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
 
         if (embedding != null) {
             params.put("embedding", embedding);
+        }
+        if (originalFieldName != null && !originalFieldName.isBlank()) {
+            sql.append(" AND LOWER(s.original_field_name) = LOWER(:originalFieldName)");
+            params.put("originalFieldName", originalFieldName);
         }
 
         if (tags != null && tags.length > 0) {

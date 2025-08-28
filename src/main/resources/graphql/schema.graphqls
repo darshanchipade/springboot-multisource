@@ -1,5 +1,5 @@
 type Query {
-    search(query: String!, limit: Int = 10, tags: [String], keywords: [String], contextPath: [String], contextValue: String): [ContentChunk]
+    search(query: String!, original_field_name:String,limit: Int = 10, tags: [String], keywords: [String], contextPath: [String], contextValue: String): [ContentChunk]
 }
 
 type ContentChunk {
