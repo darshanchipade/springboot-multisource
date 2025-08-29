@@ -32,14 +32,15 @@ public class DataIngestionService {
     private static final Logger logger = LoggerFactory.getLogger(DataIngestionService.class);
 
     private final RawDataStoreRepository rawDataStoreRepository;
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimer");
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
             "valentine", "Valentine day",
             "father's day", "Fathers day",
             "tax", "Tax day",
-            "christmas", "Christmas"
+            "christmas", "Christmas",
+            "mothers","Mpthers day"
     );
 
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
@@ -403,7 +404,7 @@ public class DataIngestionService {
 
             currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
-                JsonNode fieldValue = entry.getValue();
+                    JsonNode fieldValue = entry.getValue();
                 String fragmentPath = currentEnvelope.getSourcePath();
                 String containerPath = (parentEnvelope != null
                         && parentEnvelope.getSourcePath() != null
@@ -424,17 +425,38 @@ public class DataIngestionService {
                         currentEnvelope.setUsagePath(usagePath);
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
-                    } else {
+                    }else if ((fieldValue.isArray())){
+                        // e.g., fieldKey == "disclaimers"
+                        // element is each object inside disclaimers[]
+                        for (JsonNode element : fieldValue) {
+                            if (element.isObject()  && element.has("items") && element.get("items").isArray()) {
+                                for (JsonNode item : element.get("items")) {
+                                    if (item.isObject() && item.has("copy") && item.get("copy").isTextual()) {
+                                        currentEnvelope.setUsagePath(usagePath);
+                                        processContentField(item.get("copy").asText(), "disclaimer", currentEnvelope, currentFacets, results);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else {
                         currentEnvelope.setUsagePath(usagePath);
                         findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
                     }
                 } else if (fieldKey.toLowerCase().contains("analytics")) {
-                    try {
-                        String analyticsJson = objectMapper.writeValueAsString(fieldValue);
-                        currentEnvelope.setUsagePath(usagePath);
-                        processContentField(analyticsJson, fieldKey, currentEnvelope, currentFacets, results);
-                    } catch (JsonProcessingException e) {
-                        logger.error("Failed to serialize analytics object to JSON for field: {}", fieldKey, e);
+                    String analyticsValue = null;
+                    if (fieldValue.isArray()) {
+                      //  analyticsValue = fieldValue.get("value").asText();
+                        for (JsonNode element : fieldValue) {
+                            if (element.isObject()) {
+                                String name = element.path("name").asText(null);
+                                String value = element.path("value").asText(null);
+                                processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
+                            }
+                        }
+
+                    } else {
+                        logger.warn("Analytics attribute for key '{}' is not in a recognized format (e.g., a string or an object with a 'value' key). Skipping.", fieldKey);
                     }
                 } else if (fieldValue.isObject() || fieldValue.isArray()) {
                     currentEnvelope.setUsagePath(usagePath);
@@ -509,15 +531,15 @@ public class DataIngestionService {
     private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results) {
         String cleansedContent = cleanseCopyText(content);
         if (cleansedContent != null && !cleansedContent.isBlank()) {
-            Facets itemFacets = new Facets();
-            itemFacets.putAll(facets);
-            itemFacets.put("originalCopy", content);
-            itemFacets.put("cleansedCopy", cleansedContent);
+            //Facets itemFacets = new Facets();
+            facets.putAll(facets);
+            //itemFacets.put("originalCopy", content);
+            facets.put("cleansedCopy", cleansedContent);
 
             String lowerCaseContent = cleansedContent.toLowerCase();
             for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
                 if (lowerCaseContent.contains(entry.getKey())) {
-                    itemFacets.put("eventType", entry.getValue());
+                    facets.put("eventType", entry.getValue());
                     break;
                 }
             }
