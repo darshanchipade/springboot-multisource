@@ -537,7 +537,7 @@ public class DataIngestionService {
             facets.put("cleansedCopy", cleansedContent);
 
             String lowerCaseContent = cleansedContent.toLowerCase();
-            for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
+                for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
                 if (lowerCaseContent.contains(entry.getKey())) {
                     facets.put("eventType", entry.getValue());
                     break;
