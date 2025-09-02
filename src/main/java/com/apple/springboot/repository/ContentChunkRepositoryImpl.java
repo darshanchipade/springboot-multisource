@@ -41,11 +41,18 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
             }
         }
 
+//        if (keywords != null && keywords.length > 0) {
+//            sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
+//            params.put("keywords", keywords);
+//        }
         if (keywords != null && keywords.length > 0) {
-            sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
-            params.put("keywords", keywords);
+            for (int i = 0; i < keywords.length; i++) {
+                String paramName = "keywords" + i;
+                // For each search tag, check if it exists as a substring in any of the stored tags
+                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.keywords) db_keywords WHERE db_keywords LIKE '%' || :" + paramName + " || '%')");
+                params.put(paramName, keywords[i]);
+            }
         }
-
         if (contextPath != null && contextPath.length > 0 && contextValue != null) {
             sql.append(" AND s.context #>> :contextPath = :contextValue");
             params.put("contextPath", contextPath);

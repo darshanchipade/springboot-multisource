@@ -1,3 +1,4 @@
+
 package com.apple.springboot.service;
 
 import com.apple.springboot.model.EnrichmentContext;
@@ -101,10 +102,10 @@ public class BedrockEnrichmentService {
         String promptTemplate =
                 "Human: You are an expert content analyst AI. Your task is to analyze a piece of text and provide a set of standard content enrichments. " +
                         "You will be given the text itself in a <content> tag, and a rich JSON object providing the context of where this content lives in a <context> tag.\n\n" +
-                        "Use the metadata in the <context> object, such as the 'pathHierarchy' and 'facets', to generate more accurate and relevant enrichments.\n\n" +
+                        "Use the metadata in the <context> object, such as the 'pathHierarchy' and `facets`, to generate more accurate and relevant enrichments.\n\n" +
                         "Please provide a single, valid JSON object as your response with no extra commentary. " +
                         "The response JSON should have one top-level key: \"standardEnrichments\".\n\n" +
-                        "The 'standardEnrichments' object must contain the following keys:\n" +
+                        "The `standardEnrichments` object must contain the following keys:\n" +
                         "- 'summary': A concise summary of the content.\n" +
                         "- 'keywords': A JSON array of up to 10 relevant keywords. Keywords should be lowercase.\n" +
                         "- 'sentiment': The overall sentiment (choose one: positive, negative, neutral).\n" +
@@ -162,11 +163,18 @@ public class BedrockEnrichmentService {
             JsonNode contentBlock = responseJson.path("content");
 
             if (contentBlock.isArray() && contentBlock.size() > 0) {
-                String textContent = contentBlock.get(0).path("text").asText("");
+                String textContent = contentBlock.get(0).path("text").asText("").trim();
+
+                // Check for and strip Markdown JSON code fences
+                if (textContent.startsWith("```json")) {
+                    textContent = textContent.substring(7).trim();
+                    if (textContent.endsWith("```")) {
+                        textContent = textContent.substring(0, textContent.length() - 3).trim();
+                    }
+                }
+
                 if (textContent.startsWith("{") && textContent.endsWith("}")) {
                     try {
-                        // The entire response is the result map
-                        // return objectMapper.readValue(textContent, new TypeReference<Map<String, Object>>() {});
                         Map<String, Object> aiResults = objectMapper.readValue(textContent, new TypeReference<>() {});
                         aiResults.put("enrichedWithModel", effectiveModelId);
                         return aiResults;
@@ -177,7 +185,7 @@ public class BedrockEnrichmentService {
                         return results;
                     }
                 } else {
-                    logger.error("Bedrock response content is not a JSON object: {}", textContent);
+                    logger.error("Bedrock response content is not a JSON object after stripping fences: {}", textContent);
                     results.put("error", "Bedrock response content is not a JSON object");
                     results.put("raw_bedrock_response", textContent);
                 }
@@ -211,5 +219,77 @@ public class BedrockEnrichmentService {
             }
         }
         return list;
+    }
+
+    /**
+     * Enriches a batch of items. Note that the underlying Bedrock InvokeModel API for Anthropic Claude
+     * does not support batching multiple different prompts in a single synchronous call. This method
+     * therefore iterates over the items and calls the enrichment service for each one.
+     * Rate limiting is handled by the Resilience4j RateLimiter aspect and manual delays in the calling service.
+     */
+    public Map<String, Map<String, Object>> enrichBatch(List<CleansedItemDetail> batch) {
+        Map<String, Map<String, Object>> batchResults = new HashMap<>();
+        for (CleansedItemDetail item : batch) {
+            String fullContextId = item.sourcePath + "::" + item.originalFieldName;
+            try {
+                // Convert CleansedItemDetail to the required JsonNode and EnrichmentContext for enrichItem
+                JsonNode itemContent = objectMapper.createObjectNode().put("cleansedContent", item.cleansedContent);
+                Map<String, Object> result = enrichItem(itemContent, item.context);
+                batchResults.put(fullContextId, result);
+            } catch (Exception e) {
+                logger.error("Error enriching item in batch: {}. Error: {}", fullContextId, e.getMessage(), e);
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("error", "Failed to process item in batch: " + e.getMessage());
+                batchResults.put(fullContextId, errorResult);
+            }
+        }
+        return batchResults;
+    }
+
+    /**
+     * Generates embeddings for a batch of texts using a single call to the Amazon Titan Embedding model.
+     * The Titan model's InvokeModel API supports receiving an array of strings in the 'inputText' field.
+     * @param texts A list of strings to be embedded.
+     * @return A list of float arrays, where each array is the embedding for the corresponding text.
+     * @throws IOException if there is an error during JSON processing or the API call.
+     */
+    public List<float[]> generateEmbeddingsInBatch(List<String> texts) throws IOException {
+        if (texts == null || texts.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<float[]> allEmbeddings = new ArrayList<>();
+        ObjectNode payload = objectMapper.createObjectNode();
+        // The Titan embedding model expects a JSON array for batch, and a single string for single item.
+        // To keep it simple, we'll handle the single item case by wrapping it in a list and processing as a batch.
+        payload.set("inputText", objectMapper.valueToTree(texts));
+
+        String payloadJson = objectMapper.writeValueAsString(payload);
+        SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
+
+        InvokeModelRequest request = InvokeModelRequest.builder()
+                .modelId(embeddingModelId)
+                .contentType("application/json")
+                .accept("application/json")
+                .body(body)
+                .build();
+
+        try {
+            InvokeModelResponse response = bedrockClient.invokeModel(request);
+            JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
+            JsonNode embeddingsNode = responseJson.get("embedding");
+
+            if (embeddingsNode != null && embeddingsNode.isArray()) {
+                // The response for a batch request is an array of embedding arrays.
+                for (JsonNode embeddingArray : embeddingsNode) {
+                    float[] embedding = objectMapper.convertValue(embeddingArray, float[].class);
+                    allEmbeddings.add(embedding);
+                }
+            }
+        } catch (BedrockRuntimeException e) {
+            logger.error("Bedrock API error during batch embedding: {}", e.awsErrorDetails().errorMessage(), e);
+            throw new IOException("Bedrock API error during batch embedding.", e);
+        }
+        return allEmbeddings;
     }
 }

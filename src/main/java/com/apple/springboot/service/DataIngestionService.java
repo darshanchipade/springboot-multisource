@@ -40,7 +40,7 @@ public class DataIngestionService {
             "father's day", "Fathers day",
             "tax", "Tax day",
             "christmas", "Christmas",
-            "mothers","Mpthers day"
+            "mothers","Mothers day"
     );
 
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
