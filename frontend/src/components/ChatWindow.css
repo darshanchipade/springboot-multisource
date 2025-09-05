@@ -1,0 +1,16 @@
+.chat-window {
+  display: flex;
+  flex-direction: column;
+  height: 70vh;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.message-history {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}

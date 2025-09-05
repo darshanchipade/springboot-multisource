@@ -8,9 +8,6 @@ import org.springframework.retry.annotation.EnableRetry;
 
 @SpringBootApplication
 @EnableRetry
-@EnableJpaRepositories(basePackages = "com.apple.springboot.repository")
-@EntityScan(basePackages = "com.apple.springboot.model")
-
 public class SpringbootApplication {
 
 	public static void main(String[] args) {

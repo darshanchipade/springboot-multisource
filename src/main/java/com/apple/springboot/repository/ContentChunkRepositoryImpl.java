@@ -1,15 +1,17 @@
 package com.apple.springboot.repository;
 
 import com.apple.springboot.model.ContentChunk;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.stream.Collectors;
 
 @Repository
 public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom {
@@ -17,10 +19,12 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
     @PersistenceContext
     private EntityManager entityManager;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
-    public List<ContentChunk> findSimilar(float[] embedding, String originalFieldName,String[] tags, String[] keywords, String[] contextPath, String contextValue, int limit) {
+    public List<ContentChunk> findSimilar(float[] embedding, String originalFieldName, List<String> tags, List<String> keywords, Map<String, List<String>> context, int limit) {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT c.* FROM content_chunks c JOIN consolidated_enriched_sections s ON c.consolidated_enriched_section_id = s.id WHERE 1=1");
+        sql.append("SELECT c.*, l2_distance(c.vector, CAST(:embedding AS vector)) AS score FROM content_chunks c JOIN consolidated_enriched_section s ON c.consolidated_enriched_section_id = s.id WHERE 1=1");
 
         Map<String, Object> params = new HashMap<>();
 
@@ -32,43 +36,86 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
             params.put("originalFieldName", originalFieldName);
         }
 
-        if (tags != null && tags.length > 0) {
-            for (int i = 0; i < tags.length; i++) {
-                String paramName = "tag" + i;
-                // For each search tag, check if it exists as a substring in any of the stored tags
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.tags) db_tag WHERE db_tag LIKE '%' || :" + paramName + " || '%')");
-                params.put(paramName, tags[i]);
-            }
+        if (tags != null && !tags.isEmpty()) {
+            sql.append(" AND s.tags @> CAST(string_to_array(:tags, ',') AS text[])");
+            params.put("tags", String.join(",", tags));
         }
 
-//        if (keywords != null && keywords.length > 0) {
-//            sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
-//            params.put("keywords", keywords);
-//        }
-        if (keywords != null && keywords.length > 0) {
-            for (int i = 0; i < keywords.length; i++) {
-                String paramName = "keywords" + i;
-                // For each search tag, check if it exists as a substring in any of the stored tags
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.keywords) db_keywords WHERE db_keywords LIKE '%' || :" + paramName + " || '%')");
-                params.put(paramName, keywords[i]);
-            }
+        if (keywords != null && !keywords.isEmpty()) {
+            sql.append(" AND s.keywords @> CAST(string_to_array(:keywords, ',') AS text[])");
+            params.put("keywords", String.join(",", keywords));
         }
-        if (contextPath != null && contextPath.length > 0 && contextValue != null) {
-            sql.append(" AND s.context #>> :contextPath = :contextValue");
-            params.put("contextPath", contextPath);
-            params.put("contextValue", contextValue);
+
+        if (context != null && !context.isEmpty()) {
+            // Separate pathHierarchy from other context filters because it requires a different query structure
+            Map<String, List<String>> otherContextFilters = new HashMap<>(context);
+            List<String> pathHierarchyValues = otherContextFilters.remove("pathHierarchy");
+
+            // Handle all other context filters with a single JSON object
+            if (!otherContextFilters.isEmpty()) {
+                Map<String, Object> queryJson = new HashMap<>();
+                Map<String, String> facetsMap = new HashMap<>();
+                Map<String, String> envelopeMap = new HashMap<>();
+                List<String> facetKeys = List.of("sectionKey", "eventType", "sectionModel");
+
+                for (Map.Entry<String, List<String>> entry : otherContextFilters.entrySet()) {
+                    String key = entry.getKey();
+                    String value = entry.getValue().get(0); // Assuming single value
+                    if (facetKeys.contains(key)) {
+                        facetsMap.put(key, value);
+                    } else {
+                        envelopeMap.put(key, value);
+                    }
+                }
+                if (!facetsMap.isEmpty()) {
+                    queryJson.put("facets", facetsMap);
+                }
+                if (!envelopeMap.isEmpty()) {
+                    queryJson.put("envelope", envelopeMap);
+                }
+
+                try {
+                    String contextJson = objectMapper.writeValueAsString(queryJson);
+                    sql.append(" AND s.context @> CAST(:contextJson AS jsonb)");
+                    params.put("contextJson", contextJson);
+                } catch (JsonProcessingException e) {
+                    // Handle exception
+                }
+            }
+
+            // Handle pathHierarchy with its own specific array containment query
+            if (pathHierarchyValues != null && !pathHierarchyValues.isEmpty()) {
+                String pathValue = pathHierarchyValues.get(0);
+                try {
+                    // Let Jackson correctly serialize the string into a JSON string literal (e.g., "education")
+                    // for the array containment check.
+                    String jsonStringValue = objectMapper.writeValueAsString(pathValue);
+                    sql.append(" AND s.context -> 'envelope' -> 'pathHierarchy' @> CAST(:pathValue AS jsonb)");
+                    params.put("pathValue", jsonStringValue);
+                } catch (JsonProcessingException e) {
+                    // Handle exception
+                }
+            }
         }
 
         if (embedding != null) {
-            sql.append(" ORDER BY l2_distance(c.vector, CAST(:embedding AS vector))");
+            sql.append(" ORDER BY score");
         }
 
         sql.append(" LIMIT :limit");
         params.put("limit", limit);
 
-        Query query = entityManager.createNativeQuery(sql.toString(), ContentChunk.class);
+        Query query = entityManager.createNativeQuery(sql.toString(), "ContentChunkWithScore");
         params.forEach(query::setParameter);
 
-        return query.getResultList();
+        List<Object[]> results = query.getResultList();
+        return results.stream()
+                .map(record -> {
+                    ContentChunk chunk = (ContentChunk) record[0];
+                    Float score = (Float) record[1];
+                    chunk.setScore(score);
+                    return chunk;
+                })
+                .collect(Collectors.toList());
     }
 }

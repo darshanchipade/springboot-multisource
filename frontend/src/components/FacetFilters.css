@@ -1,0 +1,44 @@
+.facet-container {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+
+.facet-container h4 {
+    margin-top: 0;
+    color: #555;
+}
+
+.facet-categories button {
+    margin-right: 10px;
+    padding: 8px 12px;
+    border: 1px solid #007bff;
+    background-color: #fff;
+    color: #007bff;
+    cursor: pointer;
+    border-radius: 15px;
+}
+
+.facet-categories button:hover {
+    background-color: #f0f8ff;
+}
+
+.facet-values {
+    margin-top: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.facet-value-button {
+    padding: 5px 10px;
+    border: 1px solid #ccc;
+    background-color: #f8f9fa;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+.facet-value-button:hover {
+    background-color: #e2e6ea;
+}
