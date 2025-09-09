@@ -1,6 +1,9 @@
 package com.apple.springboot.model;
 
 import jakarta.persistence.*;
+import jakarta.persistence.SqlResultSetMapping;
+import jakarta.persistence.EntityResult;
+import jakarta.persistence.ColumnResult;
 import org.hibernate.annotations.Array;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -11,6 +14,13 @@ import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+@SqlResultSetMapping(
+        name = "ContentChunkWithDistanceMapping",
+        entities = @EntityResult(
+                entityClass = ContentChunk.class
+        ),
+        columns = @ColumnResult(name = "distance", type = Double.class)
+)
 @Entity
 @Data
 @Builder

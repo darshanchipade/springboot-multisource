@@ -1,18 +1,17 @@
 package com.apple.springboot.repository;
 
-import com.apple.springboot.model.ContentChunk;
+import com.apple.springboot.model.ContentChunkWithDistance;
 
 import java.util.List;
+import java.util.Map;
 
 public interface ContentChunkRepositoryCustom {
-    List<ContentChunk> findSimilar(
+    List<ContentChunkWithDistance> findSimilar(
             float[] embedding,
             String original_field_name,
             String[] tags,
             String[] keywords,
-            String[] contextPath,
-            String contextValue,
-            //double threshold,
+            Map<String, Object> contextMap,
             int limit
     );
 }

@@ -1,9 +1,13 @@
 package com.apple.springboot.repository;
 
 import com.apple.springboot.model.ContentChunk;
+import com.apple.springboot.model.ContentChunkWithDistance;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
+import jakarta.persistence.Tuple;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -17,10 +21,15 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
     @PersistenceContext
     private EntityManager entityManager;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
-    public List<ContentChunk> findSimilar(float[] embedding, String originalFieldName,String[] tags, String[] keywords, String[] contextPath, String contextValue, int limit) {
-        StringBuilder sql = new StringBuilder();
-        sql.append("SELECT c.* FROM content_chunks c JOIN consolidated_enriched_sections s ON c.consolidated_enriched_section_id = s.id WHERE 1=1");
+    public List<ContentChunkWithDistance> findSimilar(float[] embedding, String originalFieldName, String[] tags, String[] keywords, Map<String, Object> contextMap, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT c.*");
+        if (embedding != null) {
+            sql.append(", (c.vector <=> CAST(:embedding AS vector)) as distance");
+        }
+        sql.append(" FROM content_chunks c JOIN consolidated_enriched_sections s ON c.consolidated_enriched_section_id = s.id WHERE 1=1");
 
         Map<String, Object> params = new HashMap<>();
 
@@ -35,40 +44,46 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
         if (tags != null && tags.length > 0) {
             for (int i = 0; i < tags.length; i++) {
                 String paramName = "tag" + i;
-                // For each search tag, check if it exists as a substring in any of the stored tags
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.tags) db_tag WHERE db_tag LIKE '%' || :" + paramName + " || '%')");
+                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.tags) db_tag WHERE db_tag LIKE '%' || :").append(paramName).append(" || '%')");
                 params.put(paramName, tags[i]);
             }
         }
 
-//        if (keywords != null && keywords.length > 0) {
-//            sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
-//            params.put("keywords", keywords);
-//        }
         if (keywords != null && keywords.length > 0) {
             for (int i = 0; i < keywords.length; i++) {
                 String paramName = "keywords" + i;
-                // For each search tag, check if it exists as a substring in any of the stored tags
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.keywords) db_keywords WHERE db_keywords LIKE '%' || :" + paramName + " || '%')");
+                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.keywords) db_keywords WHERE db_keywords LIKE '%' || :").append(paramName).append(" || '%')");
                 params.put(paramName, keywords[i]);
             }
         }
-        if (contextPath != null && contextPath.length > 0 && contextValue != null) {
-            sql.append(" AND s.context #>> :contextPath = :contextValue");
-            params.put("contextPath", contextPath);
-            params.put("contextValue", contextValue);
+
+        if (contextMap != null && !contextMap.isEmpty()) {
+            try {
+                String jsonbFilter = objectMapper.writeValueAsString(contextMap);
+                sql.append(" AND s.context @> :jsonbFilter::jsonb");
+                params.put("jsonbFilter", jsonbFilter);
+            } catch (JsonProcessingException e) {
+                // Handle exception, maybe log it
+            }
         }
 
         if (embedding != null) {
-            sql.append(" ORDER BY l2_distance(c.vector, CAST(:embedding AS vector))");
+            sql.append(" ORDER BY distance");
         }
 
         sql.append(" LIMIT :limit");
         params.put("limit", limit);
 
-        Query query = entityManager.createNativeQuery(sql.toString(), ContentChunk.class);
+        Query query = entityManager.createNativeQuery(sql.toString(), "ContentChunkWithDistanceMapping");
         params.forEach(query::setParameter);
 
-        return query.getResultList();
+        List<Object[]> results = query.getResultList();
+        List<ContentChunkWithDistance> dtos = new ArrayList<>();
+        for (Object[] result : results) {
+            ContentChunk chunk = (ContentChunk) result[0];
+            double distance = (embedding != null) ? ((Number) result[1]).doubleValue() : 0.0;
+            dtos.add(new ContentChunkWithDistance(chunk, distance));
+        }
+        return dtos;
     }
 }
