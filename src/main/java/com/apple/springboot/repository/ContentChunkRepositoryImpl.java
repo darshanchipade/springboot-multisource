@@ -1,4 +1,3 @@
-
 package com.apple.springboot.repository;
 
 import com.apple.springboot.model.ContentChunk;
@@ -44,19 +43,13 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
         }
 
         if (tags != null && tags.length > 0) {
-            for (int i = 0; i < tags.length; i++) {
-                String paramName = "tag" + i;
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.tags) db_tag WHERE db_tag LIKE '%' || :").append(paramName).append(" || '%')");
-                params.put(paramName, tags[i]);
-            }
+            sql.append(" AND s.tags @> CAST(:tags AS text[])");
+            params.put("tags", tags);
         }
 
         if (keywords != null && keywords.length > 0) {
-            for (int i = 0; i < keywords.length; i++) {
-                String paramName = "keywords" + i;
-                sql.append(" AND EXISTS (SELECT 1 FROM unnest(s.keywords) db_keywords WHERE db_keywords LIKE '%' || :").append(paramName).append(" || '%')");
-                params.put(paramName, keywords[i]);
-            }
+            sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
+            params.put("keywords", keywords);
         }
 
         if (contextMap != null && !contextMap.isEmpty()) {
