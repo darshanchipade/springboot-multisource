@@ -1,3 +1,4 @@
+
 package com.apple.springboot.repository;
 
 import com.apple.springboot.model.ContentChunk;
@@ -21,10 +22,8 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
     @PersistenceContext
     private EntityManager entityManager;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
     @Override
-    public List<ContentChunkWithDistance> findSimilar(float[] embedding, String originalFieldName, String[] tags, String[] keywords, Map<String, Object> contextMap, int limit) {
+    public List<ContentChunkWithDistance> findSimilar(float[] embedding, String originalFieldName, String[] tags, String[] keywords, Map<String, Object> contextMap, Double threshold, int limit) {
         StringBuilder sql = new StringBuilder("SELECT c.*");
         if (embedding != null) {
             sql.append(", (c.vector <=> CAST(:embedding AS vector)) as distance");
@@ -35,6 +34,9 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
 
         if (embedding != null) {
             params.put("embedding", embedding);
+        }
+        if (threshold != null) {
+            params.put("distance_threshold", threshold);
         }
         if (originalFieldName != null && !originalFieldName.isBlank()) {
             sql.append(" AND LOWER(s.original_field_name) = LOWER(:originalFieldName)");
@@ -58,16 +60,13 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
         }
 
         if (contextMap != null && !contextMap.isEmpty()) {
-            try {
-                String jsonbFilter = objectMapper.writeValueAsString(contextMap);
-                sql.append(" AND s.context @> :jsonbFilter::jsonb");
-                params.put("jsonbFilter", jsonbFilter);
-            } catch (JsonProcessingException e) {
-                // Handle exception, maybe log it
-            }
+            buildJsonbQueries(contextMap, new ArrayList<>(), sql, params);
         }
 
         if (embedding != null) {
+            if (params.containsKey("distance_threshold")) {
+                sql.append(" AND (c.vector <=> CAST(:embedding AS vector)) < :distance_threshold");
+            }
             sql.append(" ORDER BY distance");
         }
 
@@ -85,5 +84,22 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
             dtos.add(new ContentChunkWithDistance(chunk, distance));
         }
         return dtos;
+    }
+
+    private void buildJsonbQueries(Map<String, Object> map, List<String> path, StringBuilder sql, Map<String, Object> params) {
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            List<String> newPath = new ArrayList<>(path);
+            newPath.add(entry.getKey());
+
+            if (entry.getValue() instanceof Map) {
+                buildJsonbQueries((Map<String, Object>) entry.getValue(), newPath, sql, params);
+            } else if (entry.getValue() instanceof List) {
+                String pathString = "{" + String.join(",", newPath) + "}";
+                String paramName = String.join("_", newPath);
+
+                sql.append(" AND s.context #>> '").append(pathString).append("' IN (:").append(paramName).append(")");
+                params.put(paramName, (List<?>) entry.getValue());
+            }
+        }
     }
 }

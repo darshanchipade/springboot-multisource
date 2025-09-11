@@ -12,6 +12,7 @@ public interface ContentChunkRepositoryCustom {
             String[] tags,
             String[] keywords,
             Map<String, Object> contextMap,
+            Double threshold,
             int limit
     );
 }

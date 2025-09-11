@@ -22,7 +22,7 @@ public class RefinementService {
     private ObjectMapper objectMapper;
 
     public List<RefinementChip> getRefinementChips(String query) throws IOException {
-        List<ContentChunkWithDistance> initialChunks = vectorSearchService.search(query, null, 20, null, null, null);
+        List<ContentChunkWithDistance> initialChunks = vectorSearchService.search(query, null, 20, null, null, null,0.9);
 
         if (initialChunks.isEmpty()) {
             return Collections.emptyList();
@@ -32,47 +32,33 @@ public class RefinementService {
 
         for (ContentChunkWithDistance chunkWithDistance : initialChunks) {
             double distance = chunkWithDistance.getDistance();
-            double score = 1.0 - distance; // Smaller distance = higher score
+            double score = 1.0 - distance;
 
-            if (score < 0) continue; // Ignore documents that are too dissimilar
+            if (score < 0) continue;
 
             ConsolidatedEnrichedSection section = chunkWithDistance.getContentChunk().getConsolidatedEnrichedSection();
             if (section == null) continue;
 
-            // Extract from simple fields
+            // Extract Tags
             if (section.getTags() != null) {
                 section.getTags().forEach(tag -> {
                     RefinementChip chip = new RefinementChip(tag, "Tag", 0);
                     chipScores.merge(chip, score, Double::sum);
                 });
             }
+            // Extract Keywords
             if (section.getKeywords() != null) {
                 section.getKeywords().forEach(keyword -> {
                     RefinementChip chip = new RefinementChip(keyword, "Keyword", 0);
                     chipScores.merge(chip, score, Double::sum);
                 });
             }
-            if (section.getOriginalFieldName() != null && !section.getOriginalFieldName().isBlank()) {
-                RefinementChip chip = new RefinementChip(section.getOriginalFieldName(), "Original Field", 0);
-                chipScores.merge(chip, score, Double::sum);
-            }
 
-            // Extract from nested context
+            // Extract from nested context with full path
             if (section.getContext() != null) {
                 JsonNode contextNode = objectMapper.valueToTree(section.getContext());
-                extractContextChips(contextNode.path("facets"), List.of("sectionKey", "eventType", "sectionModel"), chipScores, score);
-                extractContextChips(contextNode.path("envelope"), List.of("country", "locale"), chipScores, score);
-
-                // Special handling for pathHierarchy
-                JsonNode pathHierarchyNode = contextNode.path("envelope").path("pathHierarchy");
-                if (pathHierarchyNode.isArray()) {
-                    pathHierarchyNode.forEach(path -> {
-                        if (path.isTextual() && !path.asText().isBlank()) {
-                            RefinementChip chip = new RefinementChip(path.asText(), "pathHierarchy", 0);
-                            chipScores.merge(chip, score, Double::sum);
-                        }
-                    });
-                }
+                extractContextChips(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chipScores, score);
+                extractContextChips(contextNode.path("envelope"), List.of("sectionName", "locale", "country"), "envelope", chipScores, score);
             }
         }
 
@@ -95,13 +81,13 @@ public class RefinementService {
                 .collect(Collectors.toList());
     }
 
-    private void extractContextChips(JsonNode parentNode, List<String> keys, Map<RefinementChip, Double> chipScores, double score) {
+    private void extractContextChips(JsonNode parentNode, List<String> keys, String pathPrefix, Map<RefinementChip, Double> chipScores, double score) {
         if (parentNode.isMissingNode()) return;
 
         for (String key : keys) {
             JsonNode valueNode = parentNode.path(key);
             if (valueNode.isTextual() && !valueNode.asText().isBlank()) {
-                RefinementChip chip = new RefinementChip(valueNode.asText(), "Context:" + key, 0);
+                RefinementChip chip = new RefinementChip(valueNode.asText(), "Context:" + pathPrefix + "." + key, 0);
                 chipScores.merge(chip, score, Double::sum);
             }
         }
@@ -115,32 +101,21 @@ public class RefinementService {
         if (section.getKeywords() != null) {
             section.getKeywords().forEach(keyword -> chips.add(new RefinementChip(keyword, "Keyword", 0)));
         }
-        if (section.getOriginalFieldName() != null && !section.getOriginalFieldName().isBlank()) {
-            chips.add(new RefinementChip(section.getOriginalFieldName(), "Original Field", 0));
-        }
         if (section.getContext() != null) {
             JsonNode contextNode = objectMapper.valueToTree(section.getContext());
-            extractContextChipsForCounting(contextNode.path("facets"), List.of("sectionKey", "eventType", "sectionModel"), chips);
-            extractContextChipsForCounting(contextNode.path("envelope"), List.of("country", "locale"), chips);
-            JsonNode pathHierarchyNode = contextNode.path("envelope").path("pathHierarchy");
-            if (pathHierarchyNode.isArray()) {
-                pathHierarchyNode.forEach(path -> {
-                    if (path.isTextual() && !path.asText().isBlank()) {
-                        chips.add(new RefinementChip(path.asText(), "pathHierarchy", 0));
-                    }
-                });
-            }
+            extractContextChipsForCounting(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chips);
+            extractContextChipsForCounting(contextNode.path("envelope"), List.of("sectionName", "locale", "country"), "envelope", chips);
         }
         return chips;
     }
 
-    private void extractContextChipsForCounting(JsonNode parentNode, List<String> keys, List<RefinementChip> chips) {
+    private void extractContextChipsForCounting(JsonNode parentNode, List<String> keys, String pathPrefix, List<RefinementChip> chips) {
         if (parentNode.isMissingNode()) return;
 
         for (String key : keys) {
             JsonNode valueNode = parentNode.path(key);
             if (valueNode.isTextual() && !valueNode.asText().isBlank()) {
-                chips.add(new RefinementChip(valueNode.asText(), "Context:" + key, 0));
+                chips.add(new RefinementChip(valueNode.asText(), "Context:" + pathPrefix + "." + key, 0));
             }
         }
     }

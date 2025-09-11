@@ -9,6 +9,8 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.UUID;
 
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.FetchType;
 
 @Entity
 @Setter

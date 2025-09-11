@@ -13,17 +13,17 @@ import java.util.Map;
 
 @Controller
 public class GraphQLSearchController {
-
-    private final VectorSearchService vectorSearchService;
-
-    @Autowired
-    public GraphQLSearchController(VectorSearchService vectorSearchService) {
-        this.vectorSearchService = vectorSearchService;
-    }
-
-    @QueryMapping
-    public List<ContentChunkWithDistance> search(@Argument String query, @Argument String original_field_name, @Argument Integer limit, @Argument List<String> tags, @Argument List<String> keywords, @Argument Map<String, Object> contextMap) throws IOException {
-        int limitVal = (limit != null) ? limit : 10;
-        return vectorSearchService.search(query, original_field_name, limitVal, tags, keywords, contextMap);
-    }
+//
+//    private final VectorSearchService vectorSearchService;
+//
+//    @Autowired
+//    public GraphQLSearchController(VectorSearchService vectorSearchService) {
+//        this.vectorSearchService = vectorSearchService;
+//    }
+//
+//    @QueryMapping
+//    public List<ContentChunkWithDistance> search(@Argument String query, @Argument String original_field_name, @Argument Integer limit, @Argument List<String> tags, @Argument List<String> keywords, @Argument Map<String, Object> contextMap) throws IOException {
+//        int limitVal = (limit != null) ? limit : 10;
+//        return vectorSearchService.search(query, original_field_name, limitVal, tags, keywords, contextMap);
+//    }
 }

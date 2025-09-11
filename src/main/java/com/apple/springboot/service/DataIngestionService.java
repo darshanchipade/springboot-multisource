@@ -32,6 +32,8 @@ public class DataIngestionService {
     private static final Logger logger = LoggerFactory.getLogger(DataIngestionService.class);
 
     private final RawDataStoreRepository rawDataStoreRepository;
+
+    private ContentHashingService contentHashingService;
     private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
