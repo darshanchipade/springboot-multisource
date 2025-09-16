@@ -2,6 +2,8 @@ package com.apple.springboot.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.FetchType;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -50,10 +52,12 @@ public class ConsolidatedEnrichedSection {
     @Column(name = "classification")
     private String classification;
 
+    @ElementCollection(fetch = FetchType.EAGER)
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "tags")
     private java.util.List<String> tags;
 
+    @ElementCollection(fetch = FetchType.EAGER)
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "keywords")
     private java.util.List<String> keywords;
