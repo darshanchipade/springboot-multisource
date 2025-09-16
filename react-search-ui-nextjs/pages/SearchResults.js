@@ -12,9 +12,8 @@ const SearchResults = ({ results }) => {
             {results.map((result, index) => (
                 <div key={index} className="result-item">
                     <div className="result-metadata">
-                        <span><strong>Source:</strong> {result.sourceFieldName}</span>
+                        <span><strong>Field Name:</strong> {result.sourceFieldName}</span>
                         <span><strong>Section:</strong> {result.sectionPath}</span>
-                        <span><strong>Score:</strong> {result.score.toFixed(4)}</span>
                     </div>
                     <div className="result-text">
                         <ReactMarkdown>{result.cleansedText}</ReactMarkdown>

@@ -4,13 +4,11 @@ public class SearchResultDto {
     private String cleansedText;
     private String sourceFieldName;
     private String sectionPath;
-    private double score;
 
-    public SearchResultDto(String cleansedText, String sourceFieldName, String sectionPath, double score) {
+    public SearchResultDto(String cleansedText, String sourceFieldName, String sectionPath) {
         this.cleansedText = cleansedText;
         this.sourceFieldName = sourceFieldName;
         this.sectionPath = sectionPath;
-        this.score = score;
     }
 
     // Getters and setters
@@ -38,11 +36,4 @@ public class SearchResultDto {
         this.sectionPath = sectionPath;
     }
 
-    public double getScore() {
-        return score;
-    }
-
-    public void setScore(double score) {
-        this.score = score;
-    }
 }
