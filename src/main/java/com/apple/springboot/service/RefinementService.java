@@ -21,26 +21,10 @@ public class RefinementService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    private static final Set<String> KNOWN_FIELD_NAMES = Set.of("headline", "title", "a11y", "accessibilitytext", "body");
-
     public List<RefinementChip> getRefinementChips(String query) throws IOException {
-        String[] queryWords = query.toLowerCase().split("\\s+");
-
-        String fieldNameFilter = null;
-        List<String> remainingQueryParts = new ArrayList<>();
-
-        for (String word : queryWords) {
-            if (KNOWN_FIELD_NAMES.contains(word)) {
-                fieldNameFilter = word; // Found a field name filter
-            } else {
-                remainingQueryParts.add(word);
-            }
-        }
-
-        // If a field name is specified in the query, we trust it as a hard filter and relax the semantic threshold.
-        // Otherwise, we use a stricter threshold to keep the broad semantic search relevant.
-        Double threshold = (fieldNameFilter != null) ? null : 0.9;
-        List<ContentChunkWithDistance> initialChunks = vectorSearchService.search(query, fieldNameFilter, 20, null, null, null, threshold);
+        // Perform a pure semantic search with a balanced threshold to get relevant documents.
+        Double threshold = 0.9;
+        List<ContentChunkWithDistance> initialChunks = vectorSearchService.search(query, null, 20, null, null, null, threshold);
 
         if (initialChunks.isEmpty()) {
             return Collections.emptyList();
@@ -72,7 +56,7 @@ public class RefinementService {
                 });
             }
 
-            // Extract from nested context based on new requirements
+            // Extract from nested context based on simplified requirements
             if (section.getContext() != null) {
                 JsonNode contextNode = objectMapper.valueToTree(section.getContext());
                 extractContextChips(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chipScores, score);

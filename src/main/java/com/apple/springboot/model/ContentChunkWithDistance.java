@@ -8,20 +8,8 @@ public class ContentChunkWithDistance {
         this.contentChunk = contentChunk;
         this.distance = distance;
     }
-
-    public ContentChunk getContentChunk() {
-        return contentChunk;
-    }
-
-    public void setContentChunk(ContentChunk contentChunk) {
-        this.contentChunk = contentChunk;
-    }
-
-    public double getDistance() {
-        return distance;
-    }
-
-    public void setDistance(double distance) {
-        this.distance = distance;
-    }
+    public ContentChunk getContentChunk() { return contentChunk; }
+    public void setContentChunk(ContentChunk contentChunk) { this.contentChunk = contentChunk; }
+    public double getDistance() { return distance; }
+    public void setDistance(double distance) { this.distance = distance; }
 }

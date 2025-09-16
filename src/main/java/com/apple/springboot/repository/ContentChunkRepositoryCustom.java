@@ -1,7 +1,6 @@
 package com.apple.springboot.repository;
 
 import com.apple.springboot.model.ContentChunkWithDistance;
-
 import java.util.List;
 import java.util.Map;
 

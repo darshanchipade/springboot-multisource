@@ -1,4 +1,3 @@
-
 package com.apple.springboot.controller;
 
 import com.apple.springboot.model.ContentChunkWithDistance;
@@ -41,19 +40,15 @@ public class SearchController {
                 request.getTags(),
                 request.getKeywords(),
                 request.getContext(),
-                0.9
+                null // No threshold for filtered search
         );
 
         // Transform the results into the DTO expected by the frontend
         return results.stream().map(result -> {
-            // The score is 1 - distance. Smaller distance is better.
-            double score = 1.0 - result.getDistance();
-
             return new SearchResultDto(
                     result.getContentChunk().getConsolidatedEnrichedSection().getCleansedText(),
-                    result.getContentChunk().getSourceField(),
-                    result.getContentChunk().getSectionPath(),
-                    score
+                    result.getContentChunk().getConsolidatedEnrichedSection().getOriginalFieldName(),
+                    result.getContentChunk().getSectionPath()
             );
         }).collect(Collectors.toList());
     }

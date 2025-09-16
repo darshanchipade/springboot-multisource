@@ -7,9 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
-import jakarta.persistence.Tuple;
 import org.springframework.stereotype.Repository;
-
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
@@ -41,28 +39,23 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
             sql.append(" AND LOWER(s.original_field_name) = LOWER(:originalFieldName)");
             params.put("originalFieldName", originalFieldName);
         }
-
         if (tags != null && tags.length > 0) {
             sql.append(" AND s.tags @> CAST(:tags AS text[])");
             params.put("tags", tags);
         }
-
         if (keywords != null && keywords.length > 0) {
             sql.append(" AND s.keywords @> CAST(:keywords AS text[])");
             params.put("keywords", keywords);
         }
-
         if (contextMap != null && !contextMap.isEmpty()) {
             buildJsonbQueries(contextMap, new ArrayList<>(), sql, params);
         }
-
         if (embedding != null) {
             if (params.containsKey("distance_threshold")) {
                 sql.append(" AND (c.vector <=> CAST(:embedding AS vector)) < :distance_threshold");
             }
             sql.append(" ORDER BY distance");
         }
-
         sql.append(" LIMIT :limit");
         params.put("limit", limit);
 
@@ -83,13 +76,11 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
         for (Map.Entry<String, Object> entry : map.entrySet()) {
             List<String> newPath = new ArrayList<>(path);
             newPath.add(entry.getKey());
-
             if (entry.getValue() instanceof Map) {
                 buildJsonbQueries((Map<String, Object>) entry.getValue(), newPath, sql, params);
             } else if (entry.getValue() instanceof List) {
                 String pathString = "{" + String.join(",", newPath) + "}";
                 String paramName = String.join("_", newPath);
-
                 sql.append(" AND s.context #>> '").append(pathString).append("' IN (:").append(paramName).append(")");
                 params.put(paramName, (List<?>) entry.getValue());
             }
