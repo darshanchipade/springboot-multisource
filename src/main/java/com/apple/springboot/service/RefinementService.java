@@ -105,7 +105,7 @@ public class RefinementService {
         }
         if (section.getContext() != null) {
             JsonNode contextNode = objectMapper.valueToTree(section.getContext());
-            extractContextChipsForCounting(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chips);
+            extractContextChipsForCounting(contextNode.path("facets"), List.of("sectionModel", "eventType","sectionKey"), "facets", chips);
             extractContextChipsForCounting(contextNode.path("envelope"), List.of("sectionName", "locale", "country"), "envelope", chips);
         }
         return chips;

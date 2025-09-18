@@ -234,16 +234,16 @@ public class DataIngestionService {
             return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
         }
         String contextJson = null;
-        try {
-            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
-            if (contextResource.exists()) {
-                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
-                    contextJson = FileCopyUtils.copyToString(reader);
-                }
-            }
-        } catch (IOException e) {
-            logger.warn("Could not read context-config.json, continuing without it.", e);
-        }
+//        try {
+//            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
+//            if (contextResource.exists()) {
+//                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
+//                    contextJson = FileCopyUtils.copyToString(reader);
+//                }
+//            }
+//        } catch (IOException e) {
+//            logger.warn("Could not read context-config.json, continuing without it.", e);
+//        }
         String contentHash = calculateContentHash(rawJsonContent, contextJson);
         Optional<RawDataStore> existingRawDataOpt = rawDataStoreRepository.findBySourceUriAndContentHash(sourceUriForDb, contentHash);
 
