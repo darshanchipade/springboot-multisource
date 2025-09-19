@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -90,6 +91,13 @@ public class BedrockEnrichmentService {
             embedding[i] = embeddingNode.get(i).floatValue();
         }
         return embedding;
+    }
+
+
+    @RateLimiter(name = "bedrockEmbedder")
+    @Retry(name = "bedrockEmbedder")
+    public float[] generateEmbeddingSafe(String text) throws IOException {
+        return generateEmbedding(text); // your single-item, but now protected
     }
 
     private String createEnrichmentPrompt(JsonNode itemContent, EnrichmentContext context) throws JsonProcessingException {
@@ -253,43 +261,121 @@ public class BedrockEnrichmentService {
      * @return A list of float arrays, where each array is the embedding for the corresponding text.
      * @throws IOException if there is an error during JSON processing or the API call.
      */
+    //@RateLimiter(name = "bedrock")
+    @RateLimiter(name = "bedrockEmbedder")
+    @Retry(name = "bedrockEmbedder")
     public List<float[]> generateEmbeddingsInBatch(List<String> texts) throws IOException {
-        if (texts == null || texts.isEmpty()) {
-            return Collections.emptyList();
-        }
+        if (texts == null || texts.isEmpty()) return Collections.emptyList();
 
-        List<float[]> allEmbeddings = new ArrayList<>();
+        // Prefer batch; gracefully fall back to per-item on ValidationException about JSONArray
+        try {
+            return invokeTitanEmbeddings(texts);
+        } catch (BedrockRuntimeException e) {
+            String msg = e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage();
+            // Titan sometimes enforces single-string; fall back if it rejects JSONArray
+            if (msg != null && msg.toLowerCase().contains("expected type: string") && msg.toLowerCase().contains("found: jsonarray")) {
+                logger.warn("Titan rejected batch array; falling back to per-item embedding generation.");
+                List<float[]> out = new ArrayList<>(texts.size());
+                for (String t : texts) {
+                    out.add(generateEmbedding(t)); // your existing single-item method (works with "embedding")
+                }
+                return out;
+            }
+            logger.error("Bedrock API error during batch embedding: {}", msg, e);
+            throw new IOException("Bedrock API error during batch embedding.", e);
+        }
+    }
+    private List<float[]> invokeTitanEmbeddings(List<String> texts) throws IOException {
         ObjectNode payload = objectMapper.createObjectNode();
-        // The Titan embedding model expects a JSON array for batch, and a single string for single item.
-        // To keep it simple, we'll handle the single item case by wrapping it in a list and processing as a batch.
+
+        // Titan v2 supports batch as an array; single as a string.
+        // We intentionally send an array for batch.
         payload.set("inputText", objectMapper.valueToTree(texts));
+        // Optional knobs (uncomment if you need them):
+        // payload.put("normalize", true);
+        // payload.put("dimensions", 1024);
 
         String payloadJson = objectMapper.writeValueAsString(payload);
         SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
 
         InvokeModelRequest request = InvokeModelRequest.builder()
-                .modelId(embeddingModelId)
+                .modelId(embeddingModelId)            // amazon.titan-embed-text-v2:0
                 .contentType("application/json")
                 .accept("application/json")
                 .body(body)
                 .build();
 
-        try {
-            InvokeModelResponse response = bedrockClient.invokeModel(request);
-            JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
-            JsonNode embeddingsNode = responseJson.get("embedding");
+        InvokeModelResponse response = bedrockClient.invokeModel(request);
+        JsonNode root = objectMapper.readTree(response.body().asUtf8String());
 
-            if (embeddingsNode != null && embeddingsNode.isArray()) {
-                // The response for a batch request is an array of embedding arrays.
-                for (JsonNode embeddingArray : embeddingsNode) {
-                    float[] embedding = objectMapper.convertValue(embeddingArray, float[].class);
-                    allEmbeddings.add(embedding);
+        List<float[]> results = new ArrayList<>(texts.size());
+
+        // Batch response shape:
+        if (root.has("embeddings") && root.get("embeddings").isArray()) {
+            for (JsonNode item : root.get("embeddings")) {
+                JsonNode emb = item.get("embedding");
+                if (emb == null || !emb.isArray()) {
+                    throw new IOException("Titan batch response missing 'embedding' array in one item.");
                 }
+                float[] vec = new float[emb.size()];
+                for (int i = 0; i < emb.size(); i++) {
+                    vec[i] = emb.get(i).floatValue();
+                }
+                results.add(vec);
             }
-        } catch (BedrockRuntimeException e) {
-            logger.error("Bedrock API error during batch embedding: {}", e.awsErrorDetails().errorMessage(), e);
-            throw new IOException("Bedrock API error during batch embedding.", e);
+            return results;
         }
-        return allEmbeddings;
+
+        // Single response shape (defensive fallback)
+        if (root.has("embedding") && root.get("embedding").isArray() && texts.size() == 1) {
+            JsonNode emb = root.get("embedding");
+            float[] vec = new float[emb.size()];
+            for (int i = 0; i < emb.size(); i++) vec[i] = emb.get(i).floatValue();
+            results.add(vec);
+            return results;
+        }
+
+        throw new IOException("Unexpected Titan embeddings response shape: " + root.toString());
     }
+
+
+//    public List<float[]> generateEmbeddingsInBatch(List<String> texts) throws IOException {
+//        if (texts == null || texts.isEmpty()) {
+//            return Collections.emptyList();
+//        }
+//
+//        List<float[]> allEmbeddings = new ArrayList<>();
+//        ObjectNode payload = objectMapper.createObjectNode();
+//        // The Titan embedding model expects a JSON array for batch, and a single string for single item.
+//        // To keep it simple, we'll handle the single item case by wrapping it in a list and processing as a batch.
+//        payload.set("inputText", objectMapper.valueToTree(texts));
+//
+//        String payloadJson = objectMapper.writeValueAsString(payload);
+//        SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
+//
+//        InvokeModelRequest request = InvokeModelRequest.builder()
+//                .modelId(embeddingModelId)
+//                .contentType("application/json")
+//                .accept("application/json")
+//                .body(body)
+//                .build();
+//
+//        try {
+//            InvokeModelResponse response = bedrockClient.invokeModel(request);
+//            JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
+//            JsonNode embeddingsNode = responseJson.get("embedding");
+//
+//            if (embeddingsNode != null && embeddingsNode.isArray()) {
+//                // The response for a batch request is an array of embedding arrays.
+//                for (JsonNode embeddingArray : embeddingsNode) {
+//                    float[] embedding = objectMapper.convertValue(embeddingArray, float[].class);
+//                    allEmbeddings.add(embedding);
+//                }
+//            }
+//        } catch (BedrockRuntimeException e) {
+//            logger.error("Bedrock API error during batch embedding: {}", e.awsErrorDetails().errorMessage(), e);
+//            throw new IOException("Bedrock API error during batch embedding.", e);
+//        }
+//        return allEmbeddings;
+//    }
 }

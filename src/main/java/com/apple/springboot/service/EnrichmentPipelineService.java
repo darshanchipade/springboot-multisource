@@ -5,18 +5,22 @@ import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.ContentChunkRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 public class EnrichmentPipelineService {
@@ -31,6 +35,7 @@ public class EnrichmentPipelineService {
     private final TransactionalEnrichmentService transactionalEnrichmentService;
     private final Executor enrichmentTaskExecutor;
     private final BedrockEnrichmentService bedrockEnrichmentService;
+    private final Semaphore enrichmentSemaphore;
 
 
     public EnrichmentPipelineService(CleansedDataStoreRepository cleansedDataStoreRepository,
@@ -49,9 +54,10 @@ public class EnrichmentPipelineService {
         this.transactionalEnrichmentService = transactionalEnrichmentService;
         this.enrichmentTaskExecutor = enrichmentTaskExecutor;
         this.bedrockEnrichmentService = bedrockEnrichmentService;
+        this.enrichmentSemaphore = new Semaphore(10);
     }
 
-    @Transactional
+    //@Transactional
     public void enrichAndStore(CleansedDataStore cleansedDataEntry) throws JsonProcessingException {
         if (cleansedDataEntry == null || cleansedDataEntry.getId() == null) {
             logger.warn("Received null or no ID CleansedDataStore entry for enrichment. Skipping...");
@@ -82,9 +88,21 @@ public class EnrichmentPipelineService {
 
         // Step 1: Loop and enrich all elements in parallel
         List<CompletableFuture<EnrichmentResult>> futures = itemsToEnrich.stream()
-                .map(itemDetail -> CompletableFuture.supplyAsync(
-                        () -> transactionalEnrichmentService.enrichItem(itemDetail, cleansedDataEntry),
-                        enrichmentTaskExecutor))
+                .map(itemDetail -> {
+                    try {
+                        enrichmentSemaphore.acquire();
+                        return CompletableFuture.supplyAsync(() -> {
+                            try {
+                                return transactionalEnrichmentService.enrichItem(itemDetail, cleansedDataEntry);
+                            } finally {
+                                enrichmentSemaphore.release();
+                            }
+                        }, enrichmentTaskExecutor);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Thread interrupted while waiting for semaphore", e);
+                    }
+                })
                 .collect(Collectors.toList());
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -119,29 +137,134 @@ public class EnrichmentPipelineService {
 
         // Step 3: Create content chunks once after consolidation
         List<ConsolidatedEnrichedSection> savedSections = consolidatedSectionService.getSectionsFor(cleansedDataEntry);
-        for (ConsolidatedEnrichedSection section : savedSections) {
-            List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
-            for (String chunkText : chunks) {
-                try {
-                    float[] vector = bedrockEnrichmentService.generateEmbedding(chunkText);
-                    ContentChunk contentChunk = new ContentChunk();
-                    contentChunk.setConsolidatedEnrichedSection(section);
-                    contentChunk.setChunkText(chunkText);
-                    contentChunk.setSourceField(section.getSourceUri());
-                    contentChunk.setSectionPath(section.getSectionPath());
-                    contentChunk.setVector(vector);
-                    contentChunk.setCreatedAt(OffsetDateTime.now());
-                    contentChunk.setCreatedBy("EnrichmentPipelineService");
-                    contentChunkRepository.save(contentChunk);
-                } catch (Exception e) {
-                    logger.error("Error creating content chunk for item path {}: {}", section.getSectionPath(), e.getMessage(), e);
-                    // Log and continue to the next chunk
-                }
-            }
-        }
+        createContentChunksInBatch(savedSections, itemProcessingErrors);
+
 
         // Step 4: Update final status
         updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
+    }
+
+//    private void createContentChunksInBatch(List<ConsolidatedEnrichedSection> sections, List<String> itemProcessingErrors) {
+//        if (sections == null || sections.isEmpty()) {
+//            return;
+//        }
+//
+//        List<String> allChunkTexts = new ArrayList<>();
+//        List<ContentChunk> chunkPlaceholders = new ArrayList<>();
+//
+//        for (ConsolidatedEnrichedSection section : sections) {
+//            List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
+//            for (String chunkText : chunks) {
+//                allChunkTexts.add(chunkText);
+//
+//                ContentChunk placeholder = new ContentChunk();
+//                placeholder.setConsolidatedEnrichedSection(section);
+//                placeholder.setChunkText(chunkText);
+//                placeholder.setSourceField(section.getSourceUri());
+//                placeholder.setSectionPath(section.getSectionPath());
+//                placeholder.setCreatedAt(OffsetDateTime.now());
+//                placeholder.setCreatedBy("EnrichmentPipelineService");
+//                chunkPlaceholders.add(placeholder);
+//            }
+//        }
+//
+//        if (allChunkTexts.isEmpty()) {
+//            return;
+//        }
+//
+//        try {
+//            List<float[]> embeddings = bedrockEnrichmentService.generateEmbeddingsInBatch(allChunkTexts);
+//
+//            if (embeddings.size() == chunkPlaceholders.size()) {
+//                IntStream.range(0, chunkPlaceholders.size()).forEach(i -> {
+//                    ContentChunk chunk = chunkPlaceholders.get(i);
+//                    chunk.setVector(embeddings.get(i));
+//                    contentChunkRepository.save(chunk);
+//                });
+//                logger.info("Successfully created and saved {} content chunks in a batch.", chunkPlaceholders.size());
+//            } else {
+//                String errorMessage = String.format("Mismatch between number of chunks (%d) and generated embeddings (%d). Aborting chunk saving.",
+//                        chunkPlaceholders.size(), embeddings.size());
+//                logger.error(errorMessage);
+//                itemProcessingErrors.add(errorMessage);
+//            }
+//        } catch (RequestNotPermitted rnp) {
+//            String errorMessage = "Rate limit exceeded during batch embedding generation. No content chunks were created.";
+//            logger.warn(errorMessage, rnp);
+//            itemProcessingErrors.add(errorMessage);
+//        } catch (IOException e) {
+//            String errorMessage = "Failed to generate embeddings for content chunks due to Bedrock API error.";
+//            logger.error(errorMessage, e);
+//            itemProcessingErrors.add(errorMessage);
+//        }
+//    }
+
+
+
+    private void createContentChunksInBatch(List<ConsolidatedEnrichedSection> sections, List<String> itemProcessingErrors) {
+        if (sections == null || sections.isEmpty()) return;
+
+        List<String> allChunkTexts = new ArrayList<>();
+        List<ContentChunk> placeholders = new ArrayList<>();
+
+        for (ConsolidatedEnrichedSection section : sections) {
+            String text = section.getCleansedText();
+            if (text == null || text.isBlank()) {
+                logger.debug("Section {} has empty cleansedText; skipping chunking.", section.getSectionPath());
+                continue;
+            }
+            List<String> chunks = textChunkingService.chunkIfNeeded(text);
+            if (chunks == null || chunks.isEmpty()) continue;
+
+            for (String chunkText : chunks) {
+                allChunkTexts.add(chunkText);
+                ContentChunk p = new ContentChunk();
+                p.setConsolidatedEnrichedSection(section);
+                p.setChunkText(chunkText);
+                p.setSourceField(section.getSourceUri());
+                p.setSectionPath(section.getSectionPath());
+                p.setCreatedAt(OffsetDateTime.now());
+                p.setCreatedBy("EnrichmentPipelineService");
+                placeholders.add(p);
+            }
+        }
+
+        if (allChunkTexts.isEmpty()) {
+            logger.info("No chunk texts to embed; skipping chunk creation.");
+            return;
+        }
+
+        try {
+            List<float[]> vectors = bedrockEnrichmentService.generateEmbeddingsInBatch(allChunkTexts);
+
+            int saved = 0;
+            int n = Math.min(placeholders.size(), vectors.size());
+            for (int i = 0; i < n; i++) {
+                try {
+                    ContentChunk chunk = placeholders.get(i);
+                    chunk.setVector(vectors.get(i));
+                    contentChunkRepository.save(chunk);
+                    saved++;
+                } catch (Exception e) {
+                    logger.warn("Failed to save chunk index {} path {}: {}", i, placeholders.get(i).getSectionPath(), e.toString());
+                }
+            }
+
+            if (vectors.size() != placeholders.size()) {
+                String warn = String.format(
+                        "Chunk/embedding size mismatch: chunks=%d, embeddings=%d. Saved first %d.",
+                        placeholders.size(), vectors.size(), saved
+                );
+                logger.warn(warn);
+                itemProcessingErrors.add(warn);
+            }
+
+            logger.info("Saved {} content chunks (requested {}).", saved, placeholders.size());
+        } catch (Exception e) { // catch all, including BedrockRuntimeException
+            String msg = "Embedding step failed; no chunks saved. " + e.getClass().getSimpleName() + ": " + e.getMessage();
+            logger.error(msg, e);
+            itemProcessingErrors.add(msg);
+        }
     }
 
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {
