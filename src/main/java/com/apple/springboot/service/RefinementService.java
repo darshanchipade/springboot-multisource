@@ -59,7 +59,7 @@ public class RefinementService {
             // Extract from nested context based on simplified requirements
             if (section.getContext() != null) {
                 JsonNode contextNode = objectMapper.valueToTree(section.getContext());
-                extractContextChips(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chipScores, score);
+                extractContextChips(contextNode.path("facets"), List.of("sectionModel", "eventType","sectionKey"), "facets", chipScores, score);
                 extractContextChips(contextNode.path("envelope"), List.of("sectionName", "locale", "country"), "envelope", chipScores, score);
             }
         }
