@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -38,7 +39,8 @@ public class TransactionalEnrichmentService {
         this.aiResponseValidator = aiResponseValidator;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    //@Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Retry(name = "bedrockRetry")
     public EnrichmentResult enrichItem(CleansedItemDetail itemDetail, CleansedDataStore cleansedDataEntry) {
         try {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {

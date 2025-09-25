@@ -5,19 +5,24 @@ import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.ContentChunkRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.apple.springboot.model.*;
+import com.apple.springboot.repository.CleansedDataStoreRepository;
+import com.apple.springboot.repository.ContentChunkRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -35,7 +40,7 @@ public class EnrichmentPipelineService {
     private final TransactionalEnrichmentService transactionalEnrichmentService;
     private final Executor enrichmentTaskExecutor;
     private final BedrockEnrichmentService bedrockEnrichmentService;
-    private final Semaphore enrichmentSemaphore;
+    private final RateLimiter bedrockEnricherRateLimiter;
 
 
     public EnrichmentPipelineService(CleansedDataStoreRepository cleansedDataStoreRepository,
@@ -45,7 +50,8 @@ public class EnrichmentPipelineService {
                                      ContentChunkRepository contentChunkRepository,
                                      TransactionalEnrichmentService transactionalEnrichmentService,
                                      @Qualifier("enrichmentTaskExecutor") Executor enrichmentTaskExecutor,
-                                     BedrockEnrichmentService bedrockEnrichmentService) {
+                                     BedrockEnrichmentService bedrockEnrichmentService,
+                                     @Qualifier("bedrockEnricherRateLimiter") RateLimiter bedrockEnricherRateLimiter) {
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
         this.consolidatedSectionService = consolidatedSectionService;
@@ -54,10 +60,11 @@ public class EnrichmentPipelineService {
         this.transactionalEnrichmentService = transactionalEnrichmentService;
         this.enrichmentTaskExecutor = enrichmentTaskExecutor;
         this.bedrockEnrichmentService = bedrockEnrichmentService;
-        this.enrichmentSemaphore = new Semaphore(10);
+        this.bedrockEnricherRateLimiter = bedrockEnricherRateLimiter;
     }
 
     //@Transactional
+    @Bulkhead(name = "bedrockBulkhead")
     public void enrichAndStore(CleansedDataStore cleansedDataEntry) throws JsonProcessingException {
         if (cleansedDataEntry == null || cleansedDataEntry.getId() == null) {
             logger.warn("Received null or no ID CleansedDataStore entry for enrichment. Skipping...");
@@ -88,21 +95,13 @@ public class EnrichmentPipelineService {
 
         // Step 1: Loop and enrich all elements in parallel
         List<CompletableFuture<EnrichmentResult>> futures = itemsToEnrich.stream()
-                .map(itemDetail -> {
-                    try {
-                        enrichmentSemaphore.acquire();
-                        return CompletableFuture.supplyAsync(() -> {
-                            try {
-                                return transactionalEnrichmentService.enrichItem(itemDetail, cleansedDataEntry);
-                            } finally {
-                                enrichmentSemaphore.release();
-                            }
-                        }, enrichmentTaskExecutor);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("Thread interrupted while waiting for semaphore", e);
-                    }
-                })
+                .map(itemDetail -> CompletableFuture.supplyAsync(
+                        RateLimiter.decorateSupplier(
+                                bedrockEnricherRateLimiter,
+                                () -> transactionalEnrichmentService.enrichItem(itemDetail, cleansedDataEntry)
+                        ),
+                        enrichmentTaskExecutor
+                ))
                 .collect(Collectors.toList());
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();

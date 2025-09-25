@@ -453,7 +453,13 @@ public class DataIngestionService {
                             if (element.isObject()) {
                                 String name = element.path("name").asText(null);
                                 String value = element.path("value").asText(null);
-                                processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
+                               // processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
+                                if (name != null && !name.isBlank() && value != null) {
+                                    processContentField(value, name, currentEnvelope, currentFacets, results);
+                                } else {
+                                    logger.warn("Skipping analytics attribute with missing name or value at path: {}",
+                                            currentEnvelope.getSourcePath());
+                                }
                             }
                         }
 
@@ -518,6 +524,7 @@ public class DataIngestionService {
         return currentEnvelope;
     }
 
+
     private Facets buildCurrentFacets(JsonNode currentNode, Facets parentFacets) {
         Facets currentFacets = new Facets();
         currentFacets.putAll(parentFacets);
@@ -535,11 +542,10 @@ public class DataIngestionService {
         if (cleansedContent != null && !cleansedContent.isBlank()) {
             //Facets itemFacets = new Facets();
             facets.putAll(facets);
-            //itemFacets.put("originalCopy", content);
             facets.put("cleansedCopy", cleansedContent);
 
             String lowerCaseContent = cleansedContent.toLowerCase();
-                for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
+            for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
                 if (lowerCaseContent.contains(entry.getKey())) {
                     facets.put("eventType", entry.getValue());
                     break;

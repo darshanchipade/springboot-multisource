@@ -1517,7 +1517,8 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "e22dc83de69134678f2bb485ef8bedeb2275d28c5a97423bcbfd83a487fb9b1d",
-                          "copy": "A new era for Siri.",
+                          "copy": "A new era for Siri coming this Valentine day",
+
                           "_meta": []
                         },
                         "copy": {
@@ -1526,7 +1527,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "6fc71b46909bfa68c7e5196a8d9fe564e20b4ce3afb3718392c5e6da207a3d57",
-                          "copy": "Awareness of your personal context enables Siri to help you in ways that are unique to you. Can't find the name of a book a friend recommended? Siri can help you find what you're looking for without compromising your privacy.",
+                          "copy": "hell Awareness of your personal context enables Siri to help you in ways that are unique to you. Can't find the name of a book a friend recommended? Siri can help you find what you're looking for without compromising your privacy.",
                           "_meta": []
                         },
                         "theme": "light",
@@ -1539,7 +1540,7 @@
                             "textType": "plainText",
                             "metadata": [],
                             "_id": "1d60d414eff10cd2654a209331586a3cf5ad5635a2bfe12a52f38f3239ff5aa0",
-                            "copy": "Apple Intelligence featuring contextual search with Siri on iPad mini with Smart Folio",
+                            "copy": "New to AI ? Apple Intelligence featuring contextual search with Siri on iPad mini with Smart Folio",
                             "_meta": []
                           },
                           "viewportSmall": {
@@ -2714,7 +2715,7 @@
                     "textType": "plainText",
                     "metadata": [],
                     "_id": "69214f25a52a266ca6bb56cc28c68a1742b148e056b043bf05e0446a197be676",
-                    "copy": "iPad - Art and Drawing",
+                    "copy": "Test iPad - Art and Drawing",
                     "_meta": []
                   },
                   "modalPageDescription": {
@@ -2747,7 +2748,7 @@
                       "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/feature-card-section-items/gallery-items/creativity-items/open-items/ac-title",
                       "_model": "analytics",
                       "name": "data-analytics-title",
-                      "value": "open modal - creativity",
+                      "value": "Test open modal - creativity",
                       "_id": "c996a55ca6cfc11592825774ee957a3c72b68e8b8e8a96a1a5b6284b1cb76fa3"
                     }
                   ],
@@ -2778,7 +2779,7 @@
                   "textType": "plainText",
                   "metadata": [],
                   "_id": "b5c0dc14fdf68875ad0ef6c8bd65df05d0cbabdbc7cf860b162c242ce19e39e8",
-                  "copy": "Close up of an illustration created in Procreate",
+                  "copy": "Test Close up of an illustration created in Procreate",
                   "_meta": []
                 },
                 "viewportExtraSmall": {
@@ -2816,7 +2817,7 @@
                   "uri2x": "/assets-www/en_WW/ipad/feature_card/medium/fc_creativity_81a9bde1b_2x.jpg",
                   "pinning": "bottom",
                   "_id": "79af56aff35474a2be35a9e904d39435f85e242cf957748a1b63442f3131376e",
-                  "_uri1x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity.jpg",
+                  "_uri1x_path": "Test /content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity.jpg",
                   "width1x": 344,
                   "height1x": 684,
                   "_uri2x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity_2x.jpg",
@@ -3015,7 +3016,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "fd1b5290475e0a8e627318cbbf8cf133aaebe015113647fb4baad55fe4aa28f1",
-                          "copy": "Enhance your education with accessories.",
+                          "copy": "Test Enhance your education with accessories.",
                           "_meta": []
                         },
                         "copy": {
@@ -3026,7 +3027,7 @@
                             "80bdd20acfc9145629b40ce239cfc4b78ed8be03529d2ae37bb4614bfbb19cbd"
                           ],
                           "_id": "565afaa6db2a53f68923d9445d6eaec9402ae5940aa884e12b04a4c6eceb1cf4",
-                          "copy": "Jump-start your notes and projects with accessories that were made for iPad.{%sosumi type=\"numbered\" metadata=\"1\"%} Grab an Apple{%nbsp%}Pencil and take handwritten and digital notes or connect a keyboard and make quick work of all your emails, essays, and presentations.",
+                          "copy": "Test Jump-start your notes and projects with accessories that were made for iPad.{%sosumi type=\"numbered\" metadata=\"1\"%} Grab an Apple{%nbsp%}Pencil and take handwritten and digital notes or connect a keyboard and make quick work of all your emails, essays, and presentations.",
                           "_meta": [
                             {
                               "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/legal/selling-conditions/accessories-sold-separately",
@@ -3120,7 +3121,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "999a32b204d9d93e478a1b43aea63b43a69a9f681edb364644db99337961e91c",
-                          "copy": "Apps for discovery and exploration.",
+                          "copy": "Test Apps for discovery and exploration.",
                           "_meta": []
                         },
                         "copy": {
