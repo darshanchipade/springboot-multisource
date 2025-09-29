@@ -1,10 +1,10 @@
 package com.apple.springboot.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -29,43 +29,39 @@ public class AIResponseValidator {
             return false;
         }
 
-        // Check for top-level keys
-        if (!bedrockResponse.containsKey("standardEnrichments") || !(bedrockResponse.get("standardEnrichments") instanceof Map)) {
-            logger.warn("Validation failed: Missing or invalid 'standardEnrichments' object.");
-            return false;
-        }
-        if (!bedrockResponse.containsKey("context") || !(bedrockResponse.get("context") instanceof Map)) {
-            logger.warn("Validation failed: Missing or invalid 'context' object.");
-            return false;
-        }
-
-        // Check structure of the 'context' object
-        @SuppressWarnings("unchecked")
-        Map<String, Object> context = (Map<String, Object>) bedrockResponse.get("context");
-
-        if (!isFieldPresentAndOfType(context, "fullContextId", String.class)) {
-            logger.warn("Validation failed: 'fullContextId' is missing or not a String in context object.");
-            return false;
-        }
-        if (!isFieldPresentAndOfType(context, "sourcePath", String.class)) {
-            logger.warn("Validation failed: 'sourcePath' is missing or not a String in context object.");
-            return false;
-        }
-
-        // Check for provenance
-        if (!isFieldPresentAndOfType(context, "provenance", Map.class)) {
-            logger.warn("Validation failed: 'provenance' is missing or not a Map in context object.");
+        // Check for standardEnrichments
+        Object standardEnrichmentsObj = bedrockResponse.get("standardEnrichments");
+        if (standardEnrichmentsObj == null || !(standardEnrichmentsObj instanceof Map)) {
+            logger.warn("Validation failed: Missing or invalid 'standardEnrichments' object in response: {}", bedrockResponse);
             return false;
         }
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> provenance = (Map<String, Object>) context.get("provenance");
-        if (!isFieldPresentAndOfType(provenance, "modelId", String.class)) {
-            logger.warn("Validation failed: 'modelId' is missing or not a String in provenance object.");
+        Map<String, Object> standardEnrichments = (Map<String, Object>) standardEnrichmentsObj;
+
+        // Validate required fields in standardEnrichments
+        if (!isFieldPresentAndOfType(standardEnrichments, "summary", String.class)) {
+            logger.warn("Validation failed: 'summary' is missing or not a String in standardEnrichments: {}", standardEnrichments);
+            return false;
+        }
+        if (!isFieldPresentAndOfType(standardEnrichments, "keywords", List.class)) {
+            logger.warn("Validation failed: 'keywords' is missing or not a List in standardEnrichments: {}", standardEnrichments);
+            return false;
+        }
+        if (!isFieldPresentAndOfType(standardEnrichments, "sentiment", String.class)) {
+            logger.warn("Validation failed: 'sentiment' is missing or not a String in standardEnrichments: {}", standardEnrichments);
+            return false;
+        }
+        if (!isFieldPresentAndOfType(standardEnrichments, "classification", String.class)) {
+            logger.warn("Validation failed: 'classification' is missing or not a String in standardEnrichments: {}", standardEnrichments);
+            return false;
+        }
+        if (!isFieldPresentAndOfType(standardEnrichments, "tags", List.class)) {
+            logger.warn("Validation failed: 'tags' is missing or not a List in standardEnrichments: {}", standardEnrichments);
             return false;
         }
 
-        logger.debug("AI response validation successful.");
+        logger.debug("AI response validation successful for item.");
         return true;
     }
 

@@ -1,7 +1,7 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.model.CleansedDataStore;
-import com.apple.springboot.model.EnrichedContentElement;
+import com.apple.springboot.model.*;
+import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,20 +10,14 @@ import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import com.apple.springboot.repository.EnrichedContentElementRepository;
 
 import java.time.OffsetDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 public class TransactionalEnrichmentService {
 
     private static final Logger logger = LoggerFactory.getLogger(TransactionalEnrichmentService.class);
-
     private final BedrockEnrichmentService bedrockEnrichmentService;
     private final EnrichedContentElementRepository enrichedContentElementRepository;
     private final ObjectMapper objectMapper;
@@ -39,12 +33,59 @@ public class TransactionalEnrichmentService {
         this.aiResponseValidator = aiResponseValidator;
     }
 
-    //@Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Retry(name = "bedrockRetry")
+    public EnrichmentResult enrichBatch(List<CleansedItemDetail> batch, CleansedDataStore cleansedDataEntry) {
+        try {
+            logger.info("Processing batch of {} items for CleansedDataStore ID: {}", batch.size(), cleansedDataEntry.getId());
+            Map<String, Map<String, Object>> batchResults = bedrockEnrichmentService.enrichBatch(batch);
+            logger.debug("Batch results: {}", batchResults);
+            int successCount = 0;
+
+            for (CleansedItemDetail item : batch) {
+                String fullContextId = item.sourcePath + "::" + item.originalFieldName;
+                logger.debug("Processing item {} at {}", fullContextId, System.currentTimeMillis());
+                Map<String, Object> result = batchResults.getOrDefault(fullContextId, new HashMap<>());
+                logger.debug("Result for item {}: {}", fullContextId, result);
+                if (result.containsKey("error")) {
+                    logger.warn("Batch item failed for CleansedDataStore ID: {}, path: {}: {}",
+                            cleansedDataEntry.getId(), item.sourcePath, result.get("error"));
+                    saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", (String) result.get("error"));
+                    continue;
+                }
+                if (!aiResponseValidator.isValid(result)) {
+                    logger.warn("Validation failed for batch item response, path: {}", item.sourcePath);
+                    saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", "Invalid AI response structure");
+                    continue;
+                }
+                // Add context and provenance
+                Map<String, Object> contextMap = objectMapper.convertValue(item.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                contextMap.put("fullContextId", fullContextId);
+                contextMap.put("sourcePath", item.sourcePath);
+                Map<String, Object> provenance = new HashMap<>();
+                provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
+                contextMap.put("provenance", provenance);
+                result.put("context", contextMap);
+                saveEnrichedElement(item, cleansedDataEntry, result, "ENRICHED");
+                successCount++;
+            }
+            logger.info("Batch processed: successCount={}, totalItems={}", successCount, batch.size());
+            return successCount > 0 ? EnrichmentResult.success() : EnrichmentResult.failure("No items successfully enriched in batch");
+        } catch (RequestNotPermitted rnp) {
+            logger.warn("Rate limit exceeded for batch in CleansedDataStore ID: {}.", cleansedDataEntry.getId(), rnp);
+            batch.forEach(item -> saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_RATE_LIMITED", rnp.getMessage()));
+            return EnrichmentResult.rateLimited("Batch rate limited: " + rnp.getMessage());
+        } catch (Exception e) {
+            logger.error("Error during batch enrichment for CleansedDataStore ID: {}: {}", cleansedDataEntry.getId(), e.getMessage(), e);
+            batch.forEach(item -> saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", e.getMessage()));
+            return EnrichmentResult.failure("Batch failed: " + e.getMessage());
+        }
+    }
     @Retry(name = "bedrockRetry")
     public EnrichmentResult enrichItem(CleansedItemDetail itemDetail, CleansedDataStore cleansedDataEntry) {
         try {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
-                logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataEntry.getId(), itemDetail.sourcePath);
+                logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.",
+                        cleansedDataEntry.getId(), itemDetail.sourcePath);
                 return EnrichmentResult.skipped();
             }
 
@@ -68,17 +109,19 @@ public class TransactionalEnrichmentService {
             enrichmentResultsFromBedrock.put("context", contextMap);
 
             if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
-                throw new RuntimeException("Validation failed for AI response structure. Check logs for details: " + objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
+                throw new RuntimeException("Validation failed for AI response: " + objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
             }
 
             saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
             return EnrichmentResult.success();
         } catch (RequestNotPermitted rnp) {
-            logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataEntry.getId(), itemDetail.sourcePath, rnp);
+            logger.warn("Rate limit exceeded for item in CleansedDataStore ID: {}, path: {}.",
+                    cleansedDataEntry.getId(), itemDetail.sourcePath, rnp);
             saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_RATE_LIMITED", rnp.getMessage());
             return EnrichmentResult.rateLimited(String.format("Item '%s': Rate limited - %s", itemDetail.sourcePath, rnp.getMessage()));
         } catch (Exception e) {
-            logger.error("Error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataEntry.getId(), itemDetail.sourcePath, e.getMessage(), e);
+            logger.error("Error during enrichment for item in CleansedDataStore ID: {}, path: {}: {}",
+                    cleansedDataEntry.getId(), itemDetail.sourcePath, e.getMessage(), e);
             saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", e.getMessage());
             return EnrichmentResult.failure(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
         }
