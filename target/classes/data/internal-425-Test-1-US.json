@@ -636,7 +636,7 @@
           "textType": "plainText",
           "metadata": [],
           "_id": "fe0a7037fa6208b7e384fb6068fbd69f2117fc251ae4a2e59d12109f6edb1c07",
-          "copy": "iPad family of products 23rd april 2025",
+          "copy": "Test iPad family of products 23rd april 2025",
           "_meta": []
         },
         "analyticsAttributes": [
@@ -659,7 +659,7 @@
               "textType": "plainText",
               "metadata": [],
               "_id": "7a4f328217ba03f1c79f26eaa1e47a046bf4a6b16914f15d1eeea34601fb5568",
-              "copy": "Previous iPad family of products",
+              "copy": "Test the update Previous iPad family of products",
               "_meta": []
             },
             "_id": "b31986118fba949ba44bcfa79b0faaf6f0c4c5830bfacec00cb2a9f3cfec8e50"
@@ -706,7 +706,7 @@
                 "250ac3177dc2f5f9d11db761e1ac01b7c5af10456fe310e1a66092265cc47f61"
               ],
               "_id": "99d24f67543a760b060e6c8e57caa70ec27c8ec233fabdaa9390fb9a8fe948ea",
-              "copy": "Get 3% Daily Cash back with Apple{%nbsp%}Card. And pay for your new iPad over 12 months, interest-free when you choose to check out with Apple{%nbsp%}Card Monthly Installments.{%sosumi type=\"external\" metadata=\"1\"%}",
+              "copy": "Test if this has an issue Get 3% Daily Cash back with Apple{%nbsp%}Card. And pay for your new iPad over 12 months, interest-free when you choose to check out with Apple{%nbsp%}Card Monthly Installments.{%sosumi type=\"external\" metadata=\"1\"%}",
               "_meta": [
                 {
                   "_path": "/content/dam/applecom-cms/live/en_US/global-legal/financing/acmi-detailed",
@@ -739,7 +739,7 @@
                   "textType": "plainText",
                   "metadata": [],
                   "_id": "96b62229a1705cf0f376e1aea533fb89c4d086cb6bd7cc24e884fcb01d3ce79e",
-                  "copy": "tel:1-800-692-7753"
+                  "copy": "Dial tel:1-800-692-7753"
                 },
                 {
                   "_path": "/content/dam/applecom-cms/live/en_US/global-legal/legal-urls/support-102730",
@@ -747,7 +747,7 @@
                   "textType": "plainText",
                   "metadata": [],
                   "_id": "c4f1688ac418d6f55590586382769e485f85b02d2570ee0d4bf4125ca17fc4a6",
-                  "copy": "https://support.apple.com/102730"
+                  "copy": "SUPPORT : https://support.apple.com/102730"
                 },
                 {
                   "_path": "/content/dam/applecom-cms/live/en_US/global-legal/legal-urls/apple-card-customer-agreement",
@@ -763,7 +763,7 @@
                   "textType": "plainText",
                   "metadata": [],
                   "_id": "1670df75c08ffa0d3e06a9c23af5b58518184a2a7fc8c3b2654e41474c474ff5",
-                  "copy": "tel:1-877-255-5923"
+                  "copy": "HELLO: tel:1-877-255-5923"
                 }
               ]
             },
@@ -778,7 +778,7 @@
                 "textType": "markdown",
                 "metadata": [],
                 "_id": "75682cd1bbebec273190a1ba84be09b9e09bfdc6e508778cf1b13d62a07f7b99",
-                "copy": "Learn more",
+                "copy": "Do you want to Learn more",
                 "_meta": []
               },
               "url": {
@@ -1517,8 +1517,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "e22dc83de69134678f2bb485ef8bedeb2275d28c5a97423bcbfd83a487fb9b1d",
-                          "copy": "A new era for Siri coming this Valentine day",
-
+                          "copy": "A new era for Siri.",
                           "_meta": []
                         },
                         "copy": {
@@ -1527,7 +1526,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "6fc71b46909bfa68c7e5196a8d9fe564e20b4ce3afb3718392c5e6da207a3d57",
-                          "copy": "hell Awareness of your personal context enables Siri to help you in ways that are unique to you. Can't find the name of a book a friend recommended? Siri can help you find what you're looking for without compromising your privacy.",
+                          "copy": "Awareness of your personal context enables Siri to help you in ways that are unique to you. Can't find the name of a book a friend recommended? Siri can help you find what you're looking for without compromising your privacy.",
                           "_meta": []
                         },
                         "theme": "light",
@@ -1540,7 +1539,7 @@
                             "textType": "plainText",
                             "metadata": [],
                             "_id": "1d60d414eff10cd2654a209331586a3cf5ad5635a2bfe12a52f38f3239ff5aa0",
-                            "copy": "New to AI ? Apple Intelligence featuring contextual search with Siri on iPad mini with Smart Folio",
+                            "copy": "Apple Intelligence featuring contextual search with Siri on iPad mini with Smart Folio",
                             "_meta": []
                           },
                           "viewportSmall": {
@@ -2715,7 +2714,7 @@
                     "textType": "plainText",
                     "metadata": [],
                     "_id": "69214f25a52a266ca6bb56cc28c68a1742b148e056b043bf05e0446a197be676",
-                    "copy": "Test iPad - Art and Drawing",
+                    "copy": "iPad - Art and Drawing",
                     "_meta": []
                   },
                   "modalPageDescription": {
@@ -2748,7 +2747,7 @@
                       "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/feature-card-section-items/gallery-items/creativity-items/open-items/ac-title",
                       "_model": "analytics",
                       "name": "data-analytics-title",
-                      "value": "Test open modal - creativity",
+                      "value": "open modal - creativity",
                       "_id": "c996a55ca6cfc11592825774ee957a3c72b68e8b8e8a96a1a5b6284b1cb76fa3"
                     }
                   ],
@@ -2779,7 +2778,7 @@
                   "textType": "plainText",
                   "metadata": [],
                   "_id": "b5c0dc14fdf68875ad0ef6c8bd65df05d0cbabdbc7cf860b162c242ce19e39e8",
-                  "copy": "Test Close up of an illustration created in Procreate",
+                  "copy": "Close up of an illustration created in Procreate",
                   "_meta": []
                 },
                 "viewportExtraSmall": {
@@ -2817,7 +2816,7 @@
                   "uri2x": "/assets-www/en_WW/ipad/feature_card/medium/fc_creativity_81a9bde1b_2x.jpg",
                   "pinning": "bottom",
                   "_id": "79af56aff35474a2be35a9e904d39435f85e242cf957748a1b63442f3131376e",
-                  "_uri1x_path": "Test /content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity.jpg",
+                  "_uri1x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity.jpg",
                   "width1x": 344,
                   "height1x": 684,
                   "_uri2x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/feature_card/medium/fc_creativity_2x.jpg",
@@ -3016,7 +3015,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "fd1b5290475e0a8e627318cbbf8cf133aaebe015113647fb4baad55fe4aa28f1",
-                          "copy": "Test Enhance your education with accessories.",
+                          "copy": "Enhance your education with accessories.",
                           "_meta": []
                         },
                         "copy": {
@@ -3027,7 +3026,7 @@
                             "80bdd20acfc9145629b40ce239cfc4b78ed8be03529d2ae37bb4614bfbb19cbd"
                           ],
                           "_id": "565afaa6db2a53f68923d9445d6eaec9402ae5940aa884e12b04a4c6eceb1cf4",
-                          "copy": "Test Jump-start your notes and projects with accessories that were made for iPad.{%sosumi type=\"numbered\" metadata=\"1\"%} Grab an Apple{%nbsp%}Pencil and take handwritten and digital notes or connect a keyboard and make quick work of all your emails, essays, and presentations.",
+                          "copy": "Jump-start your notes and projects with accessories that were made for iPad.{%sosumi type=\"numbered\" metadata=\"1\"%} Grab an Apple{%nbsp%}Pencil and take handwritten and digital notes or connect a keyboard and make quick work of all your emails, essays, and presentations.",
                           "_meta": [
                             {
                               "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/legal/selling-conditions/accessories-sold-separately",
@@ -3121,7 +3120,7 @@
                           "textType": "markdown",
                           "metadata": [],
                           "_id": "999a32b204d9d93e478a1b43aea63b43a69a9f681edb364644db99337961e91c",
-                          "copy": "Test Apps for discovery and exploration.",
+                          "copy": "Apps for discovery and exploration.",
                           "_meta": []
                         },
                         "copy": {
@@ -12528,7 +12527,7 @@
           "textType": "markdown",
           "metadata": [],
           "_id": "fe673a9d150bdc85bc1e4d3bf7725c0da17901d4751e7bf65339399bc55e9ba1",
-          "copy": "Apps are available on the App{%nbsp%}Store. Title availability is subject to change.",
+          "copy": "Test Apps are available on the App{%nbsp%}Store. Title availability is subject to change.",
           "_meta": []
         },
         {
@@ -12540,7 +12539,7 @@
           "textType": "markdown",
           "metadata": [],
           "_id": "b2d4fd5ce7f1f13460161b5f147f15b89662a47bfe7e3d7c7fd659e3bb6a2ae5",
-          "copy": "â€œLunchâ€ written by Jeff Melvin, MELVV, Maude Latour.",
+          "copy": "Test â€œLunchâ€ written by Jeff Melvin, MELVV, Maude Latour.",
           "_meta": []
         }
       ],
@@ -12557,7 +12556,7 @@
       "textType": "plainText",
       "metadata": [],
       "_id": "273466c97441af56c67fd616570fe21255db5cf917ce3c1ff9f9080e4c93d9f8",
-      "copy": "Explore the world of iPad. Featuring iPad Pro\n iPad Air\n iPad mini with Apple Intelligence\n and iPad.",
+      "copy": "Test Explore the world of iPad. Featuring iPad Pro\n iPad Air\n iPad mini with Apple Intelligence\n and iPad.",
       "_meta": []
     },
     "pageTitle": {
@@ -12587,7 +12586,7 @@
       "textType": "plainText",
       "metadata": [],
       "_id": "bfba4961e5373a08c2e7cde825e0eb9da828d192e6134beb09005566ac9b9f3e",
-      "copy": "Apple Footer",
+      "copy": "Test Apple Footer",
       "_meta": []
     },
     "breadcrumbsAccessibilityText": {
@@ -12596,7 +12595,7 @@
       "textType": "plainText",
       "metadata": [],
       "_id": "74a1dcdc578957965b605e1d08955307f1ace32c609bc8695e89993bd60e9887",
-      "copy": "Breadcrumbs",
+      "copy": "Test Breadcrumbs",
       "_meta": []
     },
     "breadcrumbs": [
