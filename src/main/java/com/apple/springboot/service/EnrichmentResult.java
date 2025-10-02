@@ -7,60 +7,55 @@ import java.util.List;
 import java.util.Optional;
 
 public class EnrichmentResult {
-    private final Status status;
-    private final String errorMessage;
+    private final boolean success;
+    private final boolean rateLimited;
     private final List<EnrichedContentElement> enrichedContentElements;
+    private final String errorMessage;
 
-    private enum Status {
-        SUCCESS,
-        FAILURE,
-        RATE_LIMITED,
-        SKIPPED
-    }
-
-    private EnrichmentResult(Status status, String errorMessage, List<EnrichedContentElement> elements) {
-        this.status = status;
+    private EnrichmentResult(boolean success, boolean rateLimited, List<EnrichedContentElement> enrichedContentElements, String errorMessage) {
+        this.success = success;
+        this.rateLimited = rateLimited;
+        this.enrichedContentElements = enrichedContentElements;
         this.errorMessage = errorMessage;
-        this.enrichedContentElements = (elements != null) ? elements : Collections.emptyList();
     }
 
-    public static EnrichmentResult success(EnrichedContentElement element) {
-        return new EnrichmentResult(Status.SUCCESS, null, Collections.singletonList(element));
+    public static EnrichmentResult success(EnrichedContentElement enrichedContentElement) {
+        return new EnrichmentResult(true, false, Collections.singletonList(enrichedContentElement), null);
     }
 
-    public static EnrichmentResult success(List<EnrichedContentElement> elements) {
-        return new EnrichmentResult(Status.SUCCESS, null, elements);
+    public static EnrichmentResult success(List<EnrichedContentElement> enrichedContentElements) {
+        return new EnrichmentResult(true, false, enrichedContentElements, null);
     }
 
     public static EnrichmentResult failure(String errorMessage) {
-        return new EnrichmentResult(Status.FAILURE, errorMessage, null);
+        return new EnrichmentResult(false, false, Collections.emptyList(), errorMessage);
     }
 
     public static EnrichmentResult rateLimited(String errorMessage) {
-        return new EnrichmentResult(Status.RATE_LIMITED, errorMessage, null);
+        return new EnrichmentResult(false, true, Collections.emptyList(), errorMessage);
     }
 
     public static EnrichmentResult skipped() {
-        return new EnrichmentResult(Status.SKIPPED, null, null);
+        return new EnrichmentResult(false, false, Collections.emptyList(), "Skipped");
     }
 
     public boolean isSuccess() {
-        return status == Status.SUCCESS;
+        return success;
     }
 
     public boolean isFailure() {
-        return status == Status.FAILURE;
+        return !success && !rateLimited;
     }
 
     public boolean isRateLimited() {
-        return status == Status.RATE_LIMITED;
-    }
-
-    public Optional<String> getErrorMessage() {
-        return Optional.ofNullable(errorMessage);
+        return rateLimited;
     }
 
     public List<EnrichedContentElement> getEnrichedContentElements() {
         return enrichedContentElements;
+    }
+
+    public Optional<String> getErrorMessage() {
+        return Optional.ofNullable(errorMessage);
     }
 }

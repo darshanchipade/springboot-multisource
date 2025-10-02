@@ -1,6 +1,9 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.model.*;
+import com.apple.springboot.model.CleansedDataStore;
+import com.apple.springboot.model.CleansedItemDetail;
+import com.apple.springboot.model.EnrichedContentElement;
+import com.apple.springboot.service.EnrichmentResult;
 import com.apple.springboot.repository.EnrichedContentElementRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,7 +17,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,81 +29,23 @@ public class TransactionalEnrichmentService {
     private final EnrichedContentElementRepository enrichedContentElementRepository;
     private final ObjectMapper objectMapper;
     private final AIResponseValidator aiResponseValidator;
-    private final JobProgressService jobProgressService;
 
     public TransactionalEnrichmentService(BedrockEnrichmentService bedrockEnrichmentService,
                                           EnrichedContentElementRepository enrichedContentElementRepository,
                                           ObjectMapper objectMapper,
-                                          AIResponseValidator aiResponseValidator,
-                                          JobProgressService jobProgressService) {
+                                          AIResponseValidator aiResponseValidator) {
         this.bedrockEnrichmentService = bedrockEnrichmentService;
         this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.objectMapper = objectMapper;
         this.aiResponseValidator = aiResponseValidator;
-        this.jobProgressService = jobProgressService;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     @Retry(name = "bedrockRetry")
-    public EnrichmentResult enrichBatch(List<CleansedItemDetail> batch, CleansedDataStore cleansedDataEntry, String jobId) {
-        try {
-            logger.info("Processing batch of {} items for CleansedDataStore ID: {}", batch.size(), cleansedDataEntry.getId());
-            jobProgressService.updateProgress(jobId, "Attempting to process batch of " + batch.size() + " items.");
-
-            Map<String, Map<String, Object>> batchResults = bedrockEnrichmentService.enrichBatch(batch);
-            logger.debug("Batch results: {}", batchResults);
-
-            List<EnrichedContentElement> successfulElements = new ArrayList<>();
-
-            for (CleansedItemDetail item : batch) {
-                String fullContextId = item.sourcePath + "::" + item.originalFieldName;
-                Map<String, Object> result = batchResults.getOrDefault(fullContextId, new HashMap<>());
-
-                if (result.containsKey("error")) {
-                    String errorMsg = (String) result.get("error");
-                    logger.warn("Batch item failed for CleansedDataStore ID: {}, path: {}: {}", cleansedDataEntry.getId(), item.sourcePath, errorMsg);
-                    saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", errorMsg);
-                    jobProgressService.updateProgress(jobId, "FAILED (in batch): " + item.sourcePath + " - " + errorMsg);
-                    continue;
-                }
-                if (!aiResponseValidator.isValid(result)) {
-                    logger.warn("Validation failed for batch item response, path: {}", item.sourcePath);
-                    saveErrorEnrichedElement(item, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", "Invalid AI response structure");
-                    jobProgressService.updateProgress(jobId, "FAILED (in batch): " + item.sourcePath + " - Invalid AI response");
-                    continue;
-                }
-
-                Map<String, Object> contextMap = objectMapper.convertValue(item.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
-                contextMap.put("fullContextId", fullContextId);
-                contextMap.put("sourcePath", item.sourcePath);
-                Map<String, Object> provenance = new HashMap<>();
-                provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
-                contextMap.put("provenance", provenance);
-                result.put("context", contextMap);
-
-                EnrichedContentElement savedElement = saveEnrichedElement(item, cleansedDataEntry, result, "ENRICHED");
-                successfulElements.add(savedElement);
-            }
-            logger.info("Batch processed: successCount={}, totalItems={}", successfulElements.size(), batch.size());
-            jobProgressService.updateProgress(jobId, "Batch finished. " + successfulElements.size() + "/" + batch.size() + " successful.");
-            return EnrichmentResult.success(successfulElements);
-        } catch (Exception e) {
-            // This is a catastrophic failure for the whole batch. The caller will handle the fallback.
-            logger.error("Catastrophic error during batch enrichment for CleansedDataStore ID: {}: {}", cleansedDataEntry.getId(), e.getMessage(), e);
-            jobProgressService.updateProgress(jobId, "Batch of " + batch.size() + " items failed entirely. Switching to single-item mode. Error: " + e.getMessage());
-            // Re-throw the exception to trigger the fallback logic in the pipeline service.
-            throw new RuntimeException("Batch enrichment failed, triggering fallback.", e);
-        }
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    @Retry(name = "bedrockRetry")
-    public EnrichmentResult enrichItem(CleansedItemDetail itemDetail, CleansedDataStore cleansedDataEntry, String jobId) {
-        jobProgressService.updateProgress(jobId, "Starting single-item enrichment for: " + itemDetail.sourcePath);
+    public EnrichmentResult enrichItem(CleansedItemDetail itemDetail, CleansedDataStore cleansedDataEntry) {
         try {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataEntry.getId(), itemDetail.sourcePath);
-                jobProgressService.updateProgress(jobId, "SKIPPED (empty content): " + itemDetail.sourcePath);
                 return EnrichmentResult.skipped();
             }
 
@@ -129,17 +73,14 @@ public class TransactionalEnrichmentService {
             }
 
             EnrichedContentElement savedElement = saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
-            jobProgressService.updateProgress(jobId, "SUCCESS: " + itemDetail.sourcePath);
             return EnrichmentResult.success(savedElement);
         } catch (RequestNotPermitted rnp) {
             logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataEntry.getId(), itemDetail.sourcePath, rnp);
             saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_RATE_LIMITED", rnp.getMessage());
-            jobProgressService.updateProgress(jobId, "RATE LIMITED: " + itemDetail.sourcePath);
             return EnrichmentResult.rateLimited(String.format("Item '%s': Rate limited - %s", itemDetail.sourcePath, rnp.getMessage()));
         } catch (Exception e) {
             logger.error("Error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataEntry.getId(), itemDetail.sourcePath, e.getMessage(), e);
             saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", e.getMessage());
-            jobProgressService.updateProgress(jobId, "FAILED: " + itemDetail.sourcePath + " - " + e.getMessage());
             return EnrichmentResult.failure(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
         }
     }
