@@ -1,6 +1,5 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.event.EnrichmentTaskCreatedEvent;
 import com.apple.springboot.model.*;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
 import com.apple.springboot.repository.ContentHashRepository;
@@ -11,7 +10,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
@@ -28,7 +26,6 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
-
 @Service
 public class DataIngestionService {
 
@@ -36,6 +33,7 @@ public class DataIngestionService {
 
     private final RawDataStoreRepository rawDataStoreRepository;
 
+    private ContentHashingService contentHashingService;
     private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
@@ -55,8 +53,10 @@ public class DataIngestionService {
     private final String defaultS3BucketName;
     private final ContentHashRepository contentHashRepository;
     private final ContextUpdateService contextUpdateService;
-    private final ApplicationEventPublisher eventPublisher;
 
+    /**
+     * Constructs the service with required repositories and config values.
+     */
     public DataIngestionService(RawDataStoreRepository rawDataStoreRepository,
                                 CleansedDataStoreRepository cleansedDataStoreRepository,
                                 ContentHashRepository contentHashRepository,
@@ -65,8 +65,7 @@ public class DataIngestionService {
                                 @Value("${app.json.file.path}") String jsonFilePath,
                                 S3StorageService s3StorageService,
                                 @Value("${app.s3.bucket-name}") String defaultS3BucketName,
-                                ContextUpdateService contextUpdateService,
-                                ApplicationEventPublisher eventPublisher) {
+                                ContextUpdateService contextUpdateService) {
         this.rawDataStoreRepository = rawDataStoreRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.contentHashRepository = contentHashRepository;
@@ -76,7 +75,6 @@ public class DataIngestionService {
         this.jsonFilePath = jsonFilePath;
         this.s3StorageService = s3StorageService;
         this.defaultS3BucketName = defaultS3BucketName;
-        this.eventPublisher = eventPublisher;
     }
 
 
@@ -110,6 +108,10 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Loads JSON from configured path and processes it.
+     * Handles both S3 and classpath loading strategies.
+     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile() throws JsonProcessingException {
         try {
@@ -136,6 +138,10 @@ public class DataIngestionService {
         }
     }
 
+    /**
+     * Handles ingestion for a specific identifier (s3:// or classpath:).
+     * Performs validation, raw storage, deduplication, and cleansing.
+     */
     @Transactional
     public CleansedDataStore ingestAndCleanseSingleFile(String identifier) throws IOException {
         logger.info("Starting ingestion and cleansing for identifier: {}", identifier);
@@ -150,6 +156,7 @@ public class DataIngestionService {
             try {
                 S3ObjectDetails s3Details = parseS3Uri(sourceUriForDb);
                 rawJsonContent = s3StorageService.downloadFileContent(s3Details.bucketName, s3Details.fileKey);
+                //setting up source content type
                 if (s3Details.fileKey.endsWith(".json")) {
                     rawDataStore.setSourceContentType("application/json");
                 } else {
@@ -227,6 +234,16 @@ public class DataIngestionService {
             return createAndSaveErrorCleansedDataStore(savedForEmpty, "EMPTY_CONTENT_LOADED","Error" ,"ContentError: Loaded content was empty.");
         }
         String contextJson = null;
+        try {
+            Resource contextResource = resourceLoader.getResource("classpath:context-config.json");
+            if (contextResource.exists()) {
+                try (Reader reader = new InputStreamReader(contextResource.getInputStream(), StandardCharsets.UTF_8)) {
+                    contextJson = FileCopyUtils.copyToString(reader);
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Could not read context-config.json, continuing without it.", e);
+        }
         String contentHash = calculateContentHash(rawJsonContent, contextJson);
         Optional<RawDataStore> existingRawDataOpt = rawDataStoreRepository.findBySourceUriAndContentHash(sourceUriForDb, contentHash);
 
@@ -247,6 +264,7 @@ public class DataIngestionService {
         rawDataStore.setRawContentBinary(rawJsonContent.getBytes(StandardCharsets.UTF_8));
         rawDataStore.setContentHash(contentHash);
 
+        // Versioning logic
         Optional<RawDataStore> latestVersionOpt = rawDataStoreRepository.findTopBySourceUriOrderByVersionDesc(sourceUriForDb);
         if (!latestVersionOpt.isEmpty()) {
             RawDataStore latestVersion = latestVersionOpt.get();
@@ -264,7 +282,6 @@ public class DataIngestionService {
 
         return processLoadedContent(rawJsonContent, savedRawDataStore);
     }
-
     @Transactional
     public CleansedDataStore ingestAndCleanseJsonPayload(String jsonPayload, String sourceIdentifier) {
         RawDataStore rawDataStore = findOrCreateRawDataStore(jsonPayload, sourceIdentifier);
@@ -361,16 +378,10 @@ public class DataIngestionService {
         cleansedDataStore.setCleansedAt(OffsetDateTime.now());
         cleansedDataStore.setCleansedItems(items);
         cleansedDataStore.setVersion(rawData.getVersion());
-        cleansedDataStore.setStatus("ENRICHMENT_QUEUED");
-
-        CleansedDataStore savedCleansedData = cleansedDataStoreRepository.save(cleansedDataStore);
-        logger.info("Saved cleansed data with ID: {}. Publishing event.", savedCleansedData.getId());
-
-        eventPublisher.publishEvent(new EnrichmentTaskCreatedEvent(this, savedCleansedData));
-
+        cleansedDataStore.setStatus("CLEANSED_PENDING_ENRICHMENT");
         rawData.setStatus("CLEANSING_COMPLETE");
         rawDataStoreRepository.save(rawData);
-        return savedCleansedData;
+        return cleansedDataStoreRepository.save(cleansedDataStore);
     }
 
     private void findAndExtractRecursive(JsonNode currentNode, String parentFieldName, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
@@ -378,6 +389,7 @@ public class DataIngestionService {
             Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
             Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
 
+            // Section detection logic
             String modelName = currentEnvelope.getModel();
             if (modelName != null && modelName.endsWith("-section")) {
                 String sectionPath = currentEnvelope.getSourcePath();
@@ -394,7 +406,7 @@ public class DataIngestionService {
 
             currentNode.fields().forEachRemaining(entry -> {
                 String fieldKey = entry.getKey();
-                JsonNode fieldValue = entry.getValue();
+                    JsonNode fieldValue = entry.getValue();
                 String fragmentPath = currentEnvelope.getSourcePath();
                 String containerPath = (parentEnvelope != null
                         && parentEnvelope.getSourcePath() != null
@@ -408,12 +420,16 @@ public class DataIngestionService {
                 if (CONTENT_FIELD_KEYS.contains(fieldKey)) {
                     if (fieldValue.isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
+                        // If the key is "copy", use the parent's name. Otherwise, use the key itself.
                         String effectiveFieldName = fieldKey.equals("copy") ? parentFieldName : fieldKey;
                         processContentField(fieldValue.asText(), effectiveFieldName, currentEnvelope, currentFacets, results);
                     } else if (fieldValue.isObject() && fieldValue.has("copy") && fieldValue.get("copy").isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
+                        // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
                     }else if ((fieldValue.isArray())){
+                        // e.g., fieldKey == "disclaimers"
+                        // element is each object inside disclaimers[]
                         for (JsonNode element : fieldValue) {
                             if (element.isObject()  && element.has("items") && element.get("items").isArray()) {
                                 for (JsonNode item : element.get("items")) {
@@ -432,16 +448,12 @@ public class DataIngestionService {
                 } else if (fieldKey.toLowerCase().contains("analytics")) {
                     String analyticsValue = null;
                     if (fieldValue.isArray()) {
+                      //  analyticsValue = fieldValue.get("value").asText();
                         for (JsonNode element : fieldValue) {
                             if (element.isObject()) {
                                 String name = element.path("name").asText(null);
                                 String value = element.path("value").asText(null);
-                                if (name != null && !name.isBlank() && value != null) {
-                                    processContentField(value, name, currentEnvelope, currentFacets, results);
-                                } else {
-                                    logger.warn("Skipping analytics attribute with missing name or value at path: {}",
-                                            currentEnvelope.getSourcePath());
-                                }
+                                processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
                             }
                         }
 
@@ -459,6 +471,7 @@ public class DataIngestionService {
                 Facets newFacets = new Facets();
                 newFacets.putAll(parentFacets);
                 newFacets.put("sectionIndex", String.valueOf(i));
+                // When recursing into an array, the parent field name is the one that pointed to the array
                 findAndExtractRecursive(arrayElement, parentFieldName, parentEnvelope, newFacets, results);
             }
         }
@@ -486,9 +499,10 @@ public class DataIngestionService {
 
         if (path != null) {
             Matcher matcher = LOCALE_PATTERN.matcher(path);
+            //cover /en_US/, /en_US, /en-US/, and /en-US.
             if (matcher.find()) {
-                String language = matcher.group(1);
-                String country  = matcher.group(2);
+                String language = matcher.group(1);         // "en"
+                String country  = matcher.group(2);         // "US"
                 String locale   = language + "_" + country;
                 currentEnvelope.setLocale(locale);
                 currentEnvelope.setLanguage(language);
@@ -504,11 +518,10 @@ public class DataIngestionService {
         return currentEnvelope;
     }
 
-
     private Facets buildCurrentFacets(JsonNode currentNode, Facets parentFacets) {
         Facets currentFacets = new Facets();
         currentFacets.putAll(parentFacets);
-        currentFacets.remove("copy");
+        currentFacets.remove("copy"); // Remove generic copy if it exists
         currentNode.fields().forEachRemaining(entry -> {
             if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
                 currentFacets.put(entry.getKey(), entry.getValue().asText());
@@ -520,11 +533,13 @@ public class DataIngestionService {
     private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results) {
         String cleansedContent = cleanseCopyText(content);
         if (cleansedContent != null && !cleansedContent.isBlank()) {
+            //Facets itemFacets = new Facets();
             facets.putAll(facets);
+            //itemFacets.put("originalCopy", content);
             facets.put("cleansedCopy", cleansedContent);
 
             String lowerCaseContent = cleansedContent.toLowerCase();
-            for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
+                for (Map.Entry<String, String> entry : EVENT_KEYWORDS.entrySet()) {
                 if (lowerCaseContent.contains(entry.getKey())) {
                     facets.put("eventType", entry.getValue());
                     break;

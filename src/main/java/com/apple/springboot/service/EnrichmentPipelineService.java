@@ -1,21 +1,21 @@
 package com.apple.springboot.service;
 
-import com.apple.springboot.model.CleansedDataStore;
-import com.apple.springboot.model.EnrichmentContext;
-import com.apple.springboot.model.JobTracker;
-import com.apple.springboot.model.SQSMessage;
+import com.apple.springboot.model.*;
 import com.apple.springboot.repository.CleansedDataStoreRepository;
-import com.apple.springboot.repository.JobTrackerRepository;
+import com.apple.springboot.repository.ContentChunkRepository;
+import com.apple.springboot.repository.EnrichedContentElementRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,30 +23,37 @@ public class EnrichmentPipelineService {
 
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentPipelineService.class);
 
+    private final BedrockEnrichmentService bedrockEnrichmentService;
+    private final EnrichedContentElementRepository enrichedContentElementRepository;
     private final CleansedDataStoreRepository cleansedDataStoreRepository;
     private final ObjectMapper objectMapper;
-    private final SqsEnrichmentPublisher sqsEnrichmentPublisher;
-    private final JobTrackerRepository jobTrackerRepository;
-    private final JobProgressService jobProgressService;
+    private final ConsolidatedSectionService consolidatedSectionService;
+    private final AIResponseValidator aiResponseValidator;
+    private final TextChunkingService textChunkingService;
+    private final ContentChunkRepository contentChunkRepository;
 
-    public EnrichmentPipelineService(CleansedDataStoreRepository cleansedDataStoreRepository,
+    public EnrichmentPipelineService(BedrockEnrichmentService bedrockEnrichmentService,
+                                     EnrichedContentElementRepository enrichedContentElementRepository,
+                                     CleansedDataStoreRepository cleansedDataStoreRepository,
                                      ObjectMapper objectMapper,
-                                     SqsEnrichmentPublisher sqsEnrichmentPublisher,
-                                     JobTrackerRepository jobTrackerRepository,
-                                     JobProgressService jobProgressService) {
+                                     ConsolidatedSectionService consolidatedSectionService,
+                                     AIResponseValidator aiResponseValidator,
+                                     TextChunkingService textChunkingService,
+                                     ContentChunkRepository contentChunkRepository) {
+        this.bedrockEnrichmentService = bedrockEnrichmentService;
+        this.enrichedContentElementRepository = enrichedContentElementRepository;
         this.cleansedDataStoreRepository = cleansedDataStoreRepository;
         this.objectMapper = objectMapper;
-        this.sqsEnrichmentPublisher = sqsEnrichmentPublisher;
-        this.jobTrackerRepository = jobTrackerRepository;
-        this.jobProgressService = jobProgressService;
+        this.consolidatedSectionService = consolidatedSectionService;
+        this.aiResponseValidator = aiResponseValidator;
+        this.textChunkingService = textChunkingService;
+        this.contentChunkRepository = contentChunkRepository;
     }
 
-    public void enrichAndStore(CleansedDataStore cleansedDataEntry, String jobId) {
-        jobProgressService.updateProgress(jobId, "Enrichment pipeline started.");
+    @Transactional
+    public void enrichAndStore(CleansedDataStore cleansedDataEntry) throws JsonProcessingException {
         if (cleansedDataEntry == null || cleansedDataEntry.getId() == null) {
             logger.warn("Received null or no ID CleansedDataStore entry for enrichment. Skipping...");
-            jobProgressService.updateProgress(jobId, "ERROR: Received null CleansedDataStore entry. Aborting.");
-            jobProgressService.completeJob(jobId);
             return;
         }
 
@@ -71,43 +78,86 @@ public class EnrichmentPipelineService {
         }
 
         List<CleansedItemDetail> itemsToEnrich = convertMapsToCleansedItemDetails(maps);
-        if (itemsToEnrich.isEmpty()) {
-            logger.info("No valid items to process for CleansedDataStore ID: {}. Marking as ENRICHED_NO_ITEMS_TO_PROCESS.", cleansedDataStoreId);
-            cleansedDataEntry.setStatus("ENRICHED_NO_ITEMS_TO_PROCESS");
-            cleansedDataStoreRepository.save(cleansedDataEntry);
-            return;
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failureCount = new AtomicInteger(0);
+        AtomicInteger skippedByRateLimitCount = new AtomicInteger(0);
+        List<String> itemProcessingErrors = new ArrayList<>();
+
+        // Step 1: Loop and enrich all elements
+        for (CleansedItemDetail itemDetail : itemsToEnrich) {
+            if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
+                logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
+                continue;
+            }
+
+            try {
+                Map<String, String> itemContent = new HashMap<>();
+                itemContent.put("cleansedContent", itemDetail.cleansedContent);
+                JsonNode itemContentAsJson = objectMapper.valueToTree(itemContent);
+
+                Map<String, Object> enrichmentResultsFromBedrock = bedrockEnrichmentService.enrichItem(itemContentAsJson, itemDetail.context);
+
+                if (enrichmentResultsFromBedrock.containsKey("error")) {
+                    throw new RuntimeException("Bedrock enrichment failed: " + enrichmentResultsFromBedrock.get("error"));
+                }
+
+                // Restore the logic to add required metadata before validation.
+                Map<String, Object> contextMap = objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                String fullContextId = itemDetail.sourcePath + "::" + itemDetail.originalFieldName;
+                contextMap.put("fullContextId", fullContextId);
+                contextMap.put("sourcePath", itemDetail.sourcePath);
+                Map<String, Object> provenance = new HashMap<>();
+                provenance.put("modelId", bedrockEnrichmentService.getConfiguredModelId());
+                contextMap.put("provenance", provenance);
+                enrichmentResultsFromBedrock.put("context", contextMap);
+
+                if (!aiResponseValidator.isValid(enrichmentResultsFromBedrock)) {
+                    throw new RuntimeException("Validation failed for AI response structure. Check logs for details: " + objectMapper.writeValueAsString(enrichmentResultsFromBedrock));
+                }
+
+                saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
+                successCount.incrementAndGet();
+            } catch (RequestNotPermitted rnp) {
+                logger.warn("Rate limit exceeded for Bedrock call (CleansedDataStore ID: {}, item path: {}). Item skipped.", cleansedDataStoreId, itemDetail.sourcePath, rnp);
+                saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_RATE_LIMITED", rnp.getMessage());
+                skippedByRateLimitCount.incrementAndGet();
+                itemProcessingErrors.add(String.format("Item '%s': Rate limited - %s", itemDetail.sourcePath, rnp.getMessage()));
+            } catch (Exception e) {
+                logger.error("Error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataStoreId, itemDetail.sourcePath, e.getMessage(), e);
+                saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", e.getMessage());
+                failureCount.incrementAndGet();
+                itemProcessingErrors.add(String.format("Item '%s': Failed - %s", itemDetail.sourcePath, e.getMessage()));
+            }
         }
 
-        // Create and save the JobTracker
-        JobTracker jobTracker = new JobTracker();
-        jobTracker.setJobId(jobId);
-        jobTracker.setCleansedDataStoreId(cleansedDataStoreId);
-        jobTracker.setTotalItems(itemsToEnrich.size());
-        jobTracker.setStatus("PENDING");
-        jobTracker.setCreatedAt(OffsetDateTime.now());
-        jobTracker.setUpdatedAt(OffsetDateTime.now());
-        jobTrackerRepository.save(jobTracker);
+        // Step 2: Consolidate sections once after all enrichments are saved
+        consolidatedSectionService.saveFromCleansedEntry(cleansedDataEntry);
 
-        jobProgressService.updateProgress(jobId, "Created JobTracker. Found " + itemsToEnrich.size() + " items to process. Publishing to SQS.");
-
-        // Publish each item to the SQS queue
-        for (CleansedItemDetail item : itemsToEnrich) {
-            SQSMessage sqsMessage = new SQSMessage(
-                    jobId,
-                    cleansedDataStoreId,
-                    item.sourcePath,
-                    item.originalFieldName,
-                    item.cleansedContent,
-                    item.model,
-                    item.context,
-                    itemsToEnrich.size()
-            );
-            sqsEnrichmentPublisher.publishEnrichmentRequest(sqsMessage);
+        // Step 3: Create content chunks once after consolidation
+        List<ConsolidatedEnrichedSection> savedSections = consolidatedSectionService.getSectionsFor(cleansedDataEntry);
+        for (ConsolidatedEnrichedSection section : savedSections) {
+            List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
+            for (String chunkText : chunks) {
+                try {
+                    float[] vector = bedrockEnrichmentService.generateEmbedding(chunkText);
+                    ContentChunk contentChunk = new ContentChunk();
+                    contentChunk.setConsolidatedEnrichedSection(section);
+                    contentChunk.setChunkText(chunkText);
+                    contentChunk.setSourceField(section.getSourceUri());
+                    contentChunk.setSectionPath(section.getSectionPath());
+                    contentChunk.setVector(vector);
+                    contentChunk.setCreatedAt(OffsetDateTime.now());
+                    contentChunk.setCreatedBy("EnrichmentPipelineService");
+                    contentChunkRepository.save(contentChunk);
+                } catch (Exception e) {
+                    logger.error("Error creating content chunk for item path {}: {}", section.getSectionPath(), e.getMessage(), e);
+                    // Log and continue to the next chunk
+                }
+            }
         }
 
-        logger.info("Successfully published all {} enrichment requests to SQS for job ID: {}", itemsToEnrich.size(), jobId);
-        jobProgressService.updateProgress(jobId, "All " + itemsToEnrich.size() + " items have been queued for enrichment.");
-        // The job is now fully asynchronous. The SqsEnrichmentWorker will handle the rest.
+        // Step 4: Update final status
+        updateFinalCleansedDataStatus(cleansedDataEntry, successCount.get(), failureCount.get(), skippedByRateLimitCount.get(), itemsToEnrich.size(), itemProcessingErrors);
     }
 
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {
@@ -127,5 +177,93 @@ public class EnrichmentPipelineService {
                 })
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
+    }
+
+    private void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
+                                     Map<String, Object> bedrockResponse, String elementStatus) throws JsonProcessingException {
+        EnrichedContentElement enrichedElement = new EnrichedContentElement();
+        enrichedElement.setCleansedDataId(parentEntry.getId());
+        enrichedElement.setVersion(parentEntry.getVersion());
+        enrichedElement.setSourceUri(parentEntry.getSourceUri());
+        enrichedElement.setItemSourcePath(itemDetail.sourcePath);
+        enrichedElement.setItemOriginalFieldName(itemDetail.originalFieldName);
+        enrichedElement.setItemModelHint(itemDetail.model);
+        enrichedElement.setCleansedText(itemDetail.cleansedContent);
+        enrichedElement.setEnrichedAt(OffsetDateTime.now());
+        enrichedElement.setContext(objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> standardEnrichments = (Map<String, Object>) bedrockResponse.getOrDefault("standardEnrichments", bedrockResponse);
+
+        enrichedElement.setSummary((String) standardEnrichments.get("summary"));
+        enrichedElement.setSentiment((String) standardEnrichments.get("sentiment"));
+        enrichedElement.setClassification((String) standardEnrichments.get("classification"));
+        enrichedElement.setKeywords((List<String>) standardEnrichments.get("keywords"));
+        enrichedElement.setTags((List<String>) standardEnrichments.get("tags"));
+        enrichedElement.setBedrockModelUsed((String) bedrockResponse.get("enrichedWithModel"));
+        enrichedElement.setStatus(elementStatus);
+        // Create and set the enrichment metadata
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("enrichedWithModel", bedrockResponse.get("enrichedWithModel"));
+        metadata.put("enrichmentTimestamp", enrichedElement.getEnrichedAt().toString());
+        try {
+            enrichedElement.setEnrichmentMetadata(objectMapper.writeValueAsString(metadata));
+        } catch (JsonProcessingException e) {
+            logger.warn("Could not serialize enrichment metadata for item path: {}", itemDetail.sourcePath, e);
+            enrichedElement.setEnrichmentMetadata("{\"error\":\"Could not serialize metadata\"}");
+        }
+
+        enrichedContentElementRepository.save(enrichedElement);
+    }
+
+    private void saveErrorEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry, String status, String errorMessage) {
+        EnrichedContentElement errorElement = new EnrichedContentElement();
+        errorElement.setCleansedDataId(parentEntry.getId());
+        errorElement.setVersion(parentEntry.getVersion());
+        errorElement.setSourceUri(parentEntry.getSourceUri());
+        errorElement.setItemSourcePath(itemDetail.sourcePath);
+        errorElement.setItemOriginalFieldName(itemDetail.originalFieldName);
+        errorElement.setItemModelHint(itemDetail.model);
+        errorElement.setCleansedText(itemDetail.cleansedContent);
+        errorElement.setEnrichedAt(OffsetDateTime.now());
+        errorElement.setStatus(status);
+        errorElement.setContext(objectMapper.convertValue(itemDetail.context, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+
+        Map<String, Object> bedrockMeta = new HashMap<>();
+        bedrockMeta.put("enrichmentError", errorMessage);
+        try {
+            errorElement.setEnrichmentMetadata(objectMapper.writeValueAsString(bedrockMeta));
+        } catch (JsonProcessingException e) {
+            errorElement.setEnrichmentMetadata("Error could not serialize");
+        }
+
+        enrichedContentElementRepository.save(errorElement);
+    }
+
+    private void updateFinalCleansedDataStatus(CleansedDataStore cleansedDataEntry, int successCount, int failureCount, int skippedByRateLimitCount, int totalItems, List<String> itemProcessingErrors) {
+        String finalStatus;
+        if (failureCount == 0 && skippedByRateLimitCount == 0 && successCount == totalItems) {
+            finalStatus = "ENRICHED_COMPLETE";
+        } else if (successCount > 0) {
+            finalStatus = "PARTIALLY_ENRICHED";
+        } else {
+            finalStatus = "ENRICHMENT_FAILED";
+        }
+        cleansedDataEntry.setStatus(finalStatus);
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalItems", totalItems);
+        summary.put("successfullyEnriched", successCount);
+        summary.put("failedEnrichment", failureCount);
+        summary.put("skippedByRateLimit", skippedByRateLimitCount);
+        summary.put("errors", itemProcessingErrors);
+        try {
+            cleansedDataEntry.setCleansingErrors(summary);
+        } catch (Exception e) {
+            logger.error("Could not set processing summary", e);
+        }
+
+        cleansedDataStoreRepository.save(cleansedDataEntry);
+        logger.info("Finished enrichment for CleansedDataStore ID: {}. Final status: {}", cleansedDataEntry.getId(), finalStatus);
     }
 }

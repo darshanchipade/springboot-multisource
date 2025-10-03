@@ -12,10 +12,6 @@ import java.util.UUID;
 public interface EnrichedContentElementRepository extends JpaRepository<EnrichedContentElement, UUID> {
     // Add custom query methods here if needed
     List<EnrichedContentElement> findAllByCleansedDataId(UUID cleansedDataId);
-    //long countByCleansedDataId(UUID cleansedDataId);
-    List<EnrichedContentElement> findAllByCleansedDataIdAndVersion(UUID cleansedDataId, Integer version);
     //Optional<EnrichedContentElement> findByItemSourcePathAndContentHash(String itemSourcePath, String contentHash);
     Optional<EnrichedContentElement> findByItemSourcePathAndItemOriginalFieldName(String itemSourcePath, String itemOriginalFieldName);
-    long countByCleansedDataId(UUID cleansedDataId);
-    long countByCleansedDataIdAndStatus(UUID cleansedDataId, String status);
 }

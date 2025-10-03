@@ -45,13 +45,6 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
-			<dependency>
-				<groupId>io.awspring.cloud</groupId>
-				<artifactId>spring-cloud-aws-dependencies</artifactId>
-				<version>3.2.0</version>
-				<type>pom</type>
-				<scope>import</scope>
-			</dependency>
 
 			<!-- If you have other BOMs, like Spring Boot's, they would also be here -->
 			<!-- Example: Spring Boot BOM (likely already present) -->
@@ -84,18 +77,6 @@
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>regions</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>io.awspring.cloud</groupId>
-			<artifactId>spring-cloud-aws-starter-sqs</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>io.awspring.cloud</groupId>
-			<artifactId>spring-cloud-aws-starter</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>software.amazon.awssdk</groupId>
-			<artifactId>sqs</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

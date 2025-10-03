@@ -36,9 +36,8 @@ public class ConsolidatedSectionService {
 
     @Transactional
     public void saveFromCleansedEntry(CleansedDataStore cleansedData) {
-        List<EnrichedContentElement> enrichedItems = enrichedRepo.findAllByCleansedDataIdAndVersion(cleansedData.getId(), cleansedData.getVersion());
-        logger.info("Found {} enriched items for CleansedDataStore ID: {} and Version: {} to consolidate.",
-                enrichedItems.size(), cleansedData.getId(), cleansedData.getVersion());
+        List<EnrichedContentElement> enrichedItems = enrichedRepo.findAllByCleansedDataId(cleansedData.getId());
+        logger.info("Found {} enriched items for CleansedDataStore ID: {} to consolidate.", enrichedItems.size(), cleansedData.getId());
 
         for (EnrichedContentElement item : enrichedItems) {
             if (item.getItemSourcePath() == null || item.getCleansedText() == null) {
