@@ -1,4 +1,3 @@
-
 package com.apple.springboot.service;
 
 import com.apple.springboot.model.EnrichmentContext;
@@ -14,11 +13,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
-import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
-import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
-import software.amazon.awssdk.core.retry.RetryMode;
-import software.amazon.awssdk.core.retry.RetryPolicy;
-import software.amazon.awssdk.core.retry.backoff.BackoffStrategy;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.BedrockRuntimeException;
@@ -26,9 +20,11 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-
 
 @Service
 public class BedrockEnrichmentService {
@@ -36,8 +32,8 @@ public class BedrockEnrichmentService {
     private static final Logger logger = LoggerFactory.getLogger(BedrockEnrichmentService.class);
     private final BedrockRuntimeClient bedrockClient;
     private final ObjectMapper objectMapper;
-    private final String bedrockModelId; // Store the model ID
-    private final String bedrockRegion; // Store the region
+    private final String bedrockModelId;
+    private final String bedrockRegion;
     private final String embeddingModelId;
 
     @Autowired
@@ -46,13 +42,11 @@ public class BedrockEnrichmentService {
                                     @Value("${aws.bedrock.modelId}") String modelId,
                                     @Value("${aws.bedrock.embeddingModelId}") String embeddingModelId) {
         this.objectMapper = objectMapper;
-        this.bedrockRegion = region;     // Store the injected region
-        this.bedrockModelId = modelId;  // Store the injected model ID
+        this.bedrockRegion = region;
+        this.bedrockModelId = modelId;
         this.embeddingModelId = embeddingModelId;
 
         if (region == null) {
-            // This check is more for robustness, Spring should prevent null for @Value resolved params
-            // unless the property itself is explicitly set to an empty value somehow and not caught by default.
             logger.error("AWS Region for Bedrock is null. Cannot initialize BedrockRuntimeClient.");
             throw new IllegalArgumentException("AWS Region for Bedrock must not be null.");
         }
@@ -96,9 +90,6 @@ public class BedrockEnrichmentService {
         String cleansedContent = itemContent.path("cleansedContent").asText("");
         String contextJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(context);
 
-
-
-        // New, more detailed prompt template
         String promptTemplate =
                 "Human: You are an expert content analyst AI. Your task is to analyze a piece of text and provide a set of standard content enrichments. " +
                         "You will be given the text itself in a <content> tag, and a rich JSON object providing the context of where this content lives in a <context> tag.\n\n" +
@@ -118,8 +109,6 @@ public class BedrockEnrichmentService {
         return String.format(promptTemplate, cleansedContent, contextJson);
     }
 
-
-    @RateLimiter(name = "bedrock")
     public Map<String, Object> enrichItem(JsonNode itemContent, EnrichmentContext context) {
         String effectiveModelId = this.bedrockModelId;
         String sourcePath = (context != null && context.getEnvelope() != null) ? context.getEnvelope().getSourcePath() : "Unknown";
@@ -165,7 +154,6 @@ public class BedrockEnrichmentService {
             if (contentBlock.isArray() && contentBlock.size() > 0) {
                 String textContent = contentBlock.get(0).path("text").asText("").trim();
 
-                // Check for and strip Markdown JSON code fences
                 if (textContent.startsWith("```json")) {
                     textContent = textContent.substring(7).trim();
                     if (textContent.endsWith("```")) {
@@ -211,28 +199,11 @@ public class BedrockEnrichmentService {
         return results;
     }
 
-    private List<String> jsonNodeToList(JsonNode node) {
-        List<String> list = new ArrayList<>();
-        if (node != null && node.isArray()) {
-            for (JsonNode element : node) {
-                list.add(element.asText());
-            }
-        }
-        return list;
-    }
-
-    /**
-     * Enriches a batch of items. Note that the underlying Bedrock InvokeModel API for Anthropic Claude
-     * does not support batching multiple different prompts in a single synchronous call. This method
-     * therefore iterates over the items and calls the enrichment service for each one.
-     * Rate limiting is handled by the Resilience4j RateLimiter aspect and manual delays in the calling service.
-     */
     public Map<String, Map<String, Object>> enrichBatch(List<CleansedItemDetail> batch) {
         Map<String, Map<String, Object>> batchResults = new HashMap<>();
         for (CleansedItemDetail item : batch) {
             String fullContextId = item.sourcePath + "::" + item.originalFieldName;
             try {
-                // Convert CleansedItemDetail to the required JsonNode and EnrichmentContext for enrichItem
                 JsonNode itemContent = objectMapper.createObjectNode().put("cleansedContent", item.cleansedContent);
                 Map<String, Object> result = enrichItem(itemContent, item.context);
                 batchResults.put(fullContextId, result);
@@ -246,13 +217,6 @@ public class BedrockEnrichmentService {
         return batchResults;
     }
 
-    /**
-     * Generates embeddings for a batch of texts using a single call to the Amazon Titan Embedding model.
-     * The Titan model's InvokeModel API supports receiving an array of strings in the 'inputText' field.
-     * @param texts A list of strings to be embedded.
-     * @return A list of float arrays, where each array is the embedding for the corresponding text.
-     * @throws IOException if there is an error during JSON processing or the API call.
-     */
     public List<float[]> generateEmbeddingsInBatch(List<String> texts) throws IOException {
         if (texts == null || texts.isEmpty()) {
             return Collections.emptyList();
@@ -260,8 +224,6 @@ public class BedrockEnrichmentService {
 
         List<float[]> allEmbeddings = new ArrayList<>();
         ObjectNode payload = objectMapper.createObjectNode();
-        // The Titan embedding model expects a JSON array for batch, and a single string for single item.
-        // To keep it simple, we'll handle the single item case by wrapping it in a list and processing as a batch.
         payload.set("inputText", objectMapper.valueToTree(texts));
 
         String payloadJson = objectMapper.writeValueAsString(payload);
@@ -280,7 +242,6 @@ public class BedrockEnrichmentService {
             JsonNode embeddingsNode = responseJson.get("embedding");
 
             if (embeddingsNode != null && embeddingsNode.isArray()) {
-                // The response for a batch request is an array of embedding arrays.
                 for (JsonNode embeddingArray : embeddingsNode) {
                     float[] embedding = objectMapper.convertValue(embeddingArray, float[].class);
                     allEmbeddings.add(embedding);

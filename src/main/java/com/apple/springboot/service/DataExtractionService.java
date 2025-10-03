@@ -10,9 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Recover;
-import org.springframework.retry.annotation.Retryable;
+
+
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileCopyUtils;
 
@@ -70,11 +69,6 @@ public class DataExtractionService {
      * @return A list of ExtractedContentOutput entities.
      * @throws IOException if file reading or processing fails.
      */
-    @Retryable(
-            value = { IOException.class }, // Only retry on IOException for file reading
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2)
-    )
     public List<ExtractedContentOutput> extractAndCleanseContentFromFile() throws IOException {
         logger.info("Attempting to read and process JSON data from file: {}",  jsonFilePath);
 
@@ -151,7 +145,7 @@ public class DataExtractionService {
      * @param e The IOException that caused the retry to fail.
      * @return A list containing a single ExtractedContentOutput indicating the failure.
      */
-    @Recover
+
     public List<ExtractedContentOutput> recover(IOException e) {
         logger.error("All retry attempts failed to process JSON file: {}. Recovering...", jsonFilePath, e);
         // Return an empty list with an error message to indicate failure
