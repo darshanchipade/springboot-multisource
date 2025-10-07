@@ -36,7 +36,9 @@ public class ContentChunkRepositoryImpl implements ContentChunkRepositoryCustom 
             params.put("distance_threshold", threshold);
         }
         if (originalFieldName != null && !originalFieldName.isBlank()) {
-            sql.append(" AND LOWER(s.original_field_name) = LOWER(:originalFieldName)");
+            sql.append(" AND LOWER(s.original_field_name) @> CAST(:original_field_name AS text[])");
+           // sql.append(" AND LOWER(s.original_field_name) = LOWER(:originalFieldName)");
+
             params.put("originalFieldName", originalFieldName);
         }
         if (tags != null && tags.length > 0) {

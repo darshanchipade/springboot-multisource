@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
@@ -29,7 +30,7 @@ public class EnrichmentPersistenceService {
         this.objectMapper = objectMapper;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
                                     Map<String, Object> bedrockResponse, String elementStatus) throws JsonProcessingException {
         EnrichedContentElement enrichedElement = new EnrichedContentElement();
@@ -66,7 +67,7 @@ public class EnrichmentPersistenceService {
         enrichedContentElementRepository.save(enrichedElement);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveErrorEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry, String status, String errorMessage) {
         EnrichedContentElement errorElement = new EnrichedContentElement();
         errorElement.setCleansedDataId(parentEntry.getId());

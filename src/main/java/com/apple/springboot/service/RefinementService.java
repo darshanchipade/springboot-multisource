@@ -41,6 +41,12 @@ public class RefinementService {
             ConsolidatedEnrichedSection section = chunkWithDistance.getContentChunk().getConsolidatedEnrichedSection();
             if (section == null) continue;
 
+            if (section.getOriginalFieldName() != null) {
+                String original_field_name= section.getOriginalFieldName();
+                    RefinementChip chip = new RefinementChip(original_field_name, "original_field_name", 0);
+                    chipScores.merge(chip, score, Double::sum);
+            }
+
             // Extract Tags
             if (section.getTags() != null) {
                 section.getTags().forEach(tag -> {
@@ -59,7 +65,7 @@ public class RefinementService {
             // Extract from nested context based on simplified requirements
             if (section.getContext() != null) {
                 JsonNode contextNode = objectMapper.valueToTree(section.getContext());
-                extractContextChips(contextNode.path("facets"), List.of("sectionModel", "eventType"), "facets", chipScores, score);
+                extractContextChips(contextNode.path("facets"), List.of("sectionKey","sectionPath", "eventType"), "facets", chipScores, score);
                 extractContextChips(contextNode.path("envelope"), List.of("sectionName", "locale", "country"), "envelope", chipScores, score);
             }
         }
