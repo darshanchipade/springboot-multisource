@@ -33,7 +33,11 @@ public class EnrichmentPersistenceService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveEnrichedElement(CleansedItemDetail itemDetail, CleansedDataStore parentEntry,
                                     Map<String, Object> bedrockResponse, String elementStatus) throws JsonProcessingException {
-        EnrichedContentElement enrichedElement = new EnrichedContentElement();
+        // Idempotency: update existing element for the same (cleansedDataId, sourcePath, field)
+        EnrichedContentElement enrichedElement = enrichedContentElementRepository
+                .findByCleansedDataIdAndItemSourcePathAndItemOriginalFieldName(
+                        parentEntry.getId(), itemDetail.sourcePath, itemDetail.originalFieldName)
+                .orElseGet(EnrichedContentElement::new);
         enrichedElement.setCleansedDataId(parentEntry.getId());
         enrichedElement.setVersion(parentEntry.getVersion());
         enrichedElement.setSourceUri(parentEntry.getSourceUri());

@@ -33,12 +33,12 @@ public class SQSEnrichmentListener {
         this.enrichmentProcessor = enrichmentProcessor;
     }
 
-    @Scheduled(fixedDelay = 5000) // Poll every 5 seconds
+    @Scheduled(fixedDelay = 2000) // Poll frequently to keep throughput stable
     public void pollQueue() {
         try {
             ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
                     .queueUrl(queueUrl)
-                    .maxNumberOfMessages(10)
+                    .maxNumberOfMessages(5) // smaller batches reduce burstiness to Bedrock
                     .waitTimeSeconds(20)
                     .build();
 
@@ -48,9 +48,16 @@ public class SQSEnrichmentListener {
                 try {
                     EnrichmentMessage enrichmentMessage = objectMapper.readValue(message.body(), EnrichmentMessage.class);
                     enrichmentProcessor.process(enrichmentMessage);
+                    // Only delete if processing completed without throttling
                     deleteMessage(message);
                 } catch (Exception e) {
-                    logger.error("Error processing message: " + message.body(), e);
+                    if (e instanceof ThrottledException) {
+                        logger.warn("Throttled while processing message. Leaving it in-flight to retry after visibility timeout.");
+                        // Do not delete; message will reappear after visibility timeout
+                    } else {
+                        logger.error("Error processing message: " + message.body(), e);
+                        // Consider moving to DLQ based on retries; for now, leave it to be retried
+                    }
                 }
             }
         } catch (Exception e) {
