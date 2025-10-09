@@ -15,6 +15,12 @@ public interface EnrichedContentElementRepository extends JpaRepository<Enriched
     //Optional<EnrichedContentElement> findByItemSourcePathAndContentHash(String itemSourcePath, String contentHash);
     Optional<EnrichedContentElement> findByItemSourcePathAndItemOriginalFieldName(String itemSourcePath, String itemOriginalFieldName);
 
+    Optional<EnrichedContentElement> findByCleansedDataIdAndItemSourcePathAndItemOriginalFieldName(
+            UUID cleansedDataId,
+            String itemSourcePath,
+            String itemOriginalFieldName
+    );
+
     long countByCleansedDataIdAndStatusContaining(UUID cleansedDataId, String error);
 
     long countByCleansedDataIdAndStatus(UUID cleansedDataId, String enriched);

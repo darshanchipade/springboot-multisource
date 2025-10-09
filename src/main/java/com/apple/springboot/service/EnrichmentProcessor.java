@@ -29,7 +29,8 @@ public class EnrichmentProcessor {
     private final ConsolidatedSectionService consolidatedSectionService;
     private final TextChunkingService textChunkingService;
     private final ContentChunkRepository contentChunkRepository;
-    private final RateLimiter bedrockRateLimiter;
+    private final RateLimiter bedrockChatRateLimiter;
+    private final RateLimiter bedrockEmbedRateLimiter;
     private final EnrichmentPersistenceService persistenceService;
     private final AIResponseValidator aiResponseValidator;
     private final ObjectMapper objectMapper;
@@ -42,7 +43,8 @@ public class EnrichmentProcessor {
                                ConsolidatedSectionService consolidatedSectionService,
                                TextChunkingService textChunkingService,
                                ContentChunkRepository contentChunkRepository,
-                               RateLimiter bedrockRateLimiter,
+                               RateLimiter bedrockChatRateLimiter,
+                               RateLimiter bedrockEmbedRateLimiter,
                                EnrichmentPersistenceService persistenceService,
                                AIResponseValidator aiResponseValidator,
                                ObjectMapper objectMapper) {
@@ -52,7 +54,8 @@ public class EnrichmentProcessor {
         this.consolidatedSectionService = consolidatedSectionService;
         this.textChunkingService = textChunkingService;
         this.contentChunkRepository = contentChunkRepository;
-        this.bedrockRateLimiter = bedrockRateLimiter;
+        this.bedrockChatRateLimiter = bedrockChatRateLimiter;
+        this.bedrockEmbedRateLimiter = bedrockEmbedRateLimiter;
         this.persistenceService = persistenceService;
         this.aiResponseValidator = aiResponseValidator;
         this.objectMapper = objectMapper;
@@ -60,8 +63,7 @@ public class EnrichmentProcessor {
 
     // This method is NO LONGER @Transactional
     public void process(EnrichmentMessage message) {
-        // This is a blocking call that will wait until a permit is available.
-        bedrockRateLimiter.acquire();
+        // Bedrock rate limiting is enforced inside BedrockEnrichmentService per operation
 
         CleansedItemDetail itemDetail = message.getCleansedItemDetail();
         UUID cleansedDataStoreId = message.getCleansedDataStoreId();
@@ -104,6 +106,11 @@ public class EnrichmentProcessor {
                     persistenceService.saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
                 }
             }
+        } catch (ThrottledException te) {
+            // Do not delete SQS message; allow visibility timeout to expire so it retries later
+            logger.warn("Bedrock throttling for item (CleansedDataStore ID: {}, item path: {}). Will retry via SQS.", cleansedDataStoreId, itemDetail.sourcePath);
+            // Re-throw to inform caller not to delete SQS message
+            throw te;
         } catch (Exception e) {
             logger.error("Critical error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataStoreId, itemDetail.sourcePath, e.getMessage(), e);
             persistenceService.saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_UNEXPECTED", e.getMessage());
@@ -135,8 +142,6 @@ public class EnrichmentProcessor {
             List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
             for (String chunkText : chunks) {
                 try {
-                    // This call also needs to be rate-limited
-                    bedrockRateLimiter.acquire();
                     float[] vector = bedrockEnrichmentService.generateEmbedding(chunkText);
                     ContentChunk contentChunk = new ContentChunk();
                     contentChunk.setConsolidatedEnrichedSection(section);
