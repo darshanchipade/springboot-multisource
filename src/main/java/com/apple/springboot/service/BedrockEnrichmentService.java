@@ -64,31 +64,32 @@ public class BedrockEnrichmentService {
     }
 
     public float[] generateEmbedding(String text) throws IOException {
-        // Rate-limit embedding calls independently of chat calls
-        if (embedRateLimiter != null) {
-            embedRateLimiter.acquire();
-        }
+        if (embedRateLimiter != null) embedRateLimiter.acquire();
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("inputText", text);
-
         String payloadJson = objectMapper.writeValueAsString(payload);
         SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
-
         InvokeModelRequest request = InvokeModelRequest.builder()
                 .modelId(embeddingModelId)
                 .contentType("application/json")
                 .accept("application/json")
                 .body(body)
                 .build();
-
-        InvokeModelResponse response = invokeWithRetry(request, true);
-        JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
-        JsonNode embeddingNode = responseJson.get("embedding");
-        float[] embedding = new float[embeddingNode.size()];
-        for (int i = 0; i < embeddingNode.size(); i++) {
-            embedding[i] = embeddingNode.get(i).floatValue();
+        try {
+            InvokeModelResponse response = invokeWithRetry(request, true);
+            JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
+            JsonNode embeddingNode = responseJson.get("embedding");
+            float[] embedding = new float[embeddingNode.size()];
+            for (int i = 0; i < embeddingNode.size(); i++) {
+                embedding[i] = embeddingNode.get(i).floatValue();
+            }
+            return embedding;
+        } catch (ThrottledException te) {
+            throw te;
+        } catch (BedrockRuntimeException e) {
+            logger.error("Bedrock API error during embedding generation: {}", e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage(), e);
+            throw new IOException("Bedrock API error during embedding generation.", e);
         }
-        return embedding;
     }
 
     private String createEnrichmentPrompt(JsonNode itemContent, EnrichmentContext context) throws JsonProcessingException {

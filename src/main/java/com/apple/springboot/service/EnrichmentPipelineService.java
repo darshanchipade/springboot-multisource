@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -64,7 +65,16 @@ public class EnrichmentPipelineService {
 
         List<CleansedItemDetail> itemsToEnrich = convertMapsToCleansedItemDetails(maps);
 
-        for (CleansedItemDetail itemDetail : itemsToEnrich) {
+        // Deduplicate by (sourcePath, originalFieldName) to avoid re-queueing identical items
+        Map<String, CleansedItemDetail> uniqueByKey = new LinkedHashMap<>();
+        for (CleansedItemDetail d : itemsToEnrich) {
+            if (d == null) continue;
+            String key = (d.sourcePath == null ? "" : d.sourcePath) + "||" + (d.originalFieldName == null ? "" : d.originalFieldName);
+            uniqueByKey.putIfAbsent(key, d);
+        }
+        List<CleansedItemDetail> uniqueItems = new java.util.ArrayList<>(uniqueByKey.values());
+
+        for (CleansedItemDetail itemDetail : uniqueItems) {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
                 continue;
@@ -75,7 +85,8 @@ public class EnrichmentPipelineService {
 
         cleansedDataEntry.setStatus("ENRICHMENT_QUEUED");
         cleansedDataStoreRepository.save(cleansedDataEntry);
-        logger.info("Finished queuing enrichment tasks for CleansedDataStore ID: {}. Final status: ENRICHMENT_QUEUED", cleansedDataEntry.getId());
+        logger.info("Queued {} unique items (from {} total) for CleansedDataStore ID: {}. Status: ENRICHMENT_QUEUED",
+                uniqueItems.size(), itemsToEnrich.size(), cleansedDataEntry.getId());
     }
 
     private List<CleansedItemDetail> convertMapsToCleansedItemDetails(List<Map<String, Object>> maps) {

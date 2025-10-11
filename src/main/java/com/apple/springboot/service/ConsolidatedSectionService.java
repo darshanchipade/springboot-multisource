@@ -52,9 +52,9 @@ public class ConsolidatedSectionService {
             if (sectionPath == null) sectionPath = item.getItemSourcePath();
             if (sectionUri  == null) sectionUri  = item.getItemSourcePath();
 
-            // This simple check prevents re-inserting the exact same item if the process is re-run.
+            // Prevent duplicate saves by checking using the derived sectionUri/sectionPath
             boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedTextAndVersion(
-                    item.getSourceUri(), item.getItemSourcePath(), item.getCleansedText(), cleansedData.getVersion());
+                    sectionUri, sectionPath, item.getCleansedText(), cleansedData.getVersion());
 
             if (!exists) {
                 ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
