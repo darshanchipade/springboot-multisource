@@ -34,7 +34,7 @@ public class DataIngestionService {
     private final RawDataStoreRepository rawDataStoreRepository;
 
     private ContentHashingService contentHashingService;
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers", "text");
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers", "text", "url");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
@@ -476,10 +476,6 @@ public class DataIngestionService {
                         : fragmentPath;
 
                 if (CONTENT_FIELD_KEYS.contains(fieldKey)) {
-                    // Do not extract anything that is a child of a URL object (e.g., url.text or url.copy)
-                    if ("url".equals(parentFieldName)) {
-                        return; // skip this field entirely
-                    }
                     if (fieldValue.isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
                         // If the key is "copy", use the parent's name. Otherwise, use the key itself.
@@ -490,8 +486,7 @@ public class DataIngestionService {
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         // If this object is under a URL, it would have been returned above. Here we are safe.
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
-                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()
-                            && (!"url".equals(fieldKey) || allowUrlExtraction(fieldKey, fieldValue, currentEnvelope))) {
+                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
                         processContentField(fieldValue.get("text").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
                     }else if ((fieldValue.isArray())){
