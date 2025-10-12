@@ -54,6 +54,32 @@ public class DataIngestionService {
     private final ContentHashRepository contentHashRepository;
     private final ContextUpdateService contextUpdateService;
 
+    // Configurable behavior flags
+    @Value("${app.ingestion.keep-blank-after-cleanse:true}")
+    private boolean keepBlankAfterCleanse;
+
+    // If true, bypass change filter and return all extracted items
+    @Value("${app.ingestion.return-all-items:false}")
+    private boolean returnAllItems;
+
+    // If true, include contextHash in change detection
+    @Value("${app.ingestion.consider-context-change:true}")
+    private boolean considerContextChange;
+
+    // If true, log debug counters for found vs kept
+    @Value("${app.ingestion.debug-counters:true}")
+    private boolean debugCountersEnabled;
+
+    // Copy cleansing patterns
+    private static final Pattern NBSP_PATTERN = Pattern.compile("\\{%nbsp%\\}");
+    // private static final Pattern SOSUMI_PATTERN = Pattern.compile("\\{%sosumi type=\"[^\"]+\" metadata=\"\\d+\"%\\}");
+    private static final Pattern BR_PATTERN = Pattern.compile("\\{%br%\\}");
+    private static final Pattern URL_PATTERN = Pattern.compile(":\\s*\\[[^\\]]+\\]\\(\\{%url metadata=\"\\d+\" destination-type=\"[^\"]+\"%\\}\\)\");
+    // private static final Pattern WJ_PATTERN = Pattern.compile("\\(\\{%wj%\\}\\)");
+    private static final Pattern NESTED_URL_PATTERN = Pattern.compile(":\\[\\s*:\\[[^\\]]+\\]\\(\\{%url metadata=\"\\d+\" destination-type=\"[^\"]+\"%\\}\\)\\]\\(\\{%wj%\\}\\)");
+    private static final Pattern METADATA_PATTERN = Pattern.compile("\\{% metadata=\"\\d+\" %\\}");
+    // private static final Pattern APR_PATTERN = Pattern.compile("\\{%apr value=\"[^\"]+\"%\\}");
+
     /**
      * Constructs the service with required repositories and config values.
      */
@@ -329,9 +355,21 @@ public class DataIngestionService {
             rootEnvelope.setUsagePath(associatedRawDataStore.getSourceUri());
             rootEnvelope.setProvenance(new HashMap<>());
 
-            findAndExtractRecursive(rootNode, "#", rootEnvelope, new Facets(), allExtractedItems);
+            IngestionCounters counters = new IngestionCounters();
+            findAndExtractRecursive(rootNode, "#", rootEnvelope, new Facets(), allExtractedItems, counters);
 
-            List<Map<String, Object>> itemsToProcess = filterForChangedItems(allExtractedItems);
+            List<Map<String, Object>> itemsToProcess = returnAllItems ? allExtractedItems : filterForChangedItems(allExtractedItems);
+
+            if (debugCountersEnabled) {
+                long keptPreFilterCopy = counters.copyKept;
+                long keptPreFilterAnalytics = counters.analyticsKept;
+                long keptPostFilterCopy = itemsToProcess.stream().filter(i -> !isAnalyticsItem(i)).count();
+                long keptPostFilterAnalytics = itemsToProcess.stream().filter(this::isAnalyticsItem).count();
+                logger.debug("Counters: copy found={}, kept(after-cleanse)={}, kept(after-filter)={}; analytics found={}, kept(after-cleanse)={}, kept(after-filter)={}; blank-kept(copy)={}, blank-kept(analytics)={}",
+                        counters.copyFound, keptPreFilterCopy, keptPostFilterCopy,
+                        counters.analyticsFound, keptPreFilterAnalytics, keptPostFilterAnalytics,
+                        counters.copyBlankKept, counters.analyticsBlankKept);
+            }
 
             if (itemsToProcess.isEmpty()) {
                 logger.info("No new or updated content to process for raw_data_id: {}", associatedRawDataStore.getId());
@@ -356,17 +394,22 @@ public class DataIngestionService {
             String sourcePath = (String) item.get("sourcePath");
             String itemType = (String) item.get("itemType");
             String newContentHash = (String) item.get("contentHash");
+            String newContextHash = (String) item.get("contextHash");
 
             if (sourcePath == null || itemType == null) continue;
 
             Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
-            if (existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContentHash(), newContentHash)) {
+            boolean contentChanged = existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContentHash(), newContentHash);
+            boolean contextChanged = considerContextChange && (existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContextHash(), newContextHash));
+            boolean changed = existingHashOpt.isEmpty() || contentChanged || contextChanged;
+            if (changed) {
                 changedItems.add(item);
-                ContentHash hashToSave = existingHashOpt.orElse(new ContentHash(sourcePath, itemType, null, null));
-                hashToSave.setContentHash(newContentHash);
-                hashToSave.setContextHash((String) item.get("contextHash"));
-                contentHashRepository.save(hashToSave);
             }
+            // Always persist latest observed hashes for this (sourcePath,itemType)
+            ContentHash hashToSave = existingHashOpt.orElse(new ContentHash(sourcePath, itemType, null, null));
+            hashToSave.setContentHash(newContentHash);
+            hashToSave.setContextHash(newContextHash);
+            contentHashRepository.save(hashToSave);
         }
         return changedItems;
     }
@@ -384,7 +427,7 @@ public class DataIngestionService {
         return cleansedDataStoreRepository.save(cleansedDataStore);
     }
 
-    private void findAndExtractRecursive(JsonNode currentNode, String parentFieldName, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results) {
+    private void findAndExtractRecursive(JsonNode currentNode, String parentFieldName, Envelope parentEnvelope, Facets parentFacets, List<Map<String, Object>> results, IngestionCounters counters) {
         if (currentNode.isObject()) {
             Envelope currentEnvelope = buildCurrentEnvelope(currentNode, parentEnvelope);
             Facets currentFacets = buildCurrentFacets(currentNode, parentFacets);
@@ -422,11 +465,11 @@ public class DataIngestionService {
                         currentEnvelope.setUsagePath(usagePath);
                         // If the key is "copy", use the parent's name. Otherwise, use the key itself.
                         String effectiveFieldName = fieldKey.equals("copy") ? parentFieldName : fieldKey;
-                        processContentField(fieldValue.asText(), effectiveFieldName, currentEnvelope, currentFacets, results);
+                        processContentField(fieldValue.asText(), effectiveFieldName, currentEnvelope, currentFacets, results, counters, false);
                     } else if (fieldValue.isObject() && fieldValue.has("copy") && fieldValue.get("copy").isTextual()) {
                         currentEnvelope.setUsagePath(usagePath);
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
-                        processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
+                        processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
                     }else if ((fieldValue.isArray())){
                         // e.g., fieldKey == "disclaimers"
                         // element is each object inside disclaimers[]
@@ -435,7 +478,7 @@ public class DataIngestionService {
                                 for (JsonNode item : element.get("items")) {
                                     if (item.isObject() && item.has("copy") && item.get("copy").isTextual()) {
                                         currentEnvelope.setUsagePath(usagePath);
-                                        processContentField(item.get("copy").asText(), "disclaimer", currentEnvelope, currentFacets, results);
+                                        processContentField(item.get("copy").asText(), "disclaimer", currentEnvelope, currentFacets, results, counters, false);
                                     }
                                 }
                             }
@@ -443,26 +486,13 @@ public class DataIngestionService {
                     }
                     else {
                         currentEnvelope.setUsagePath(usagePath);
-                        findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
+                        findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results, counters);
                     }
                 } else if (fieldKey.toLowerCase().contains("analytics")) {
-                    String analyticsValue = null;
-                    if (fieldValue.isArray()) {
-                      //  analyticsValue = fieldValue.get("value").asText();
-                        for (JsonNode element : fieldValue) {
-                            if (element.isObject()) {
-                                String name = element.path("name").asText(null);
-                                String value = element.path("value").asText(null);
-                                processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
-                            }
-                        }
-
-                    } else {
-                        logger.warn("Analytics attribute for key '{}' is not in a recognized format (e.g., a string or an object with a 'value' key). Skipping.", fieldKey);
-                    }
+                    processAnalyticsNode(fieldValue, fieldKey, currentEnvelope, currentFacets, results, counters);
                 } else if (fieldValue.isObject() || fieldValue.isArray()) {
                     currentEnvelope.setUsagePath(usagePath);
-                    findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
+                    findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results, counters);
                 }
             });
         } else if (currentNode.isArray()) {
@@ -472,7 +502,7 @@ public class DataIngestionService {
                 newFacets.putAll(parentFacets);
                 newFacets.put("sectionIndex", String.valueOf(i));
                 // When recursing into an array, the parent field name is the one that pointed to the array
-                findAndExtractRecursive(arrayElement, parentFieldName, parentEnvelope, newFacets, results);
+                findAndExtractRecursive(arrayElement, parentFieldName, parentEnvelope, newFacets, results, counters);
             }
         }
     }
@@ -530,9 +560,17 @@ public class DataIngestionService {
         return currentFacets;
     }
 
-    private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results) {
+    private void processContentField(String content, String fieldKey, Envelope envelope, Facets facets, List<Map<String, Object>> results, IngestionCounters counters, boolean isAnalytics) {
         String cleansedContent = cleanseCopyText(content);
-        if (cleansedContent != null && !cleansedContent.isBlank()) {
+        if (isAnalytics) counters.analyticsFound++; else counters.copyFound++;
+
+        boolean isBlankAfterCleanse = cleansedContent == null || cleansedContent.isBlank();
+        boolean keep = cleansedContent != null && (!isBlankAfterCleanse || keepBlankAfterCleanse);
+        if (keep && isBlankAfterCleanse) {
+            if (isAnalytics) counters.analyticsBlankKept++; else counters.copyBlankKept++;
+        }
+
+        if (keep) {
             //Facets itemFacets = new Facets();
             facets.putAll(facets);
             //itemFacets.put("originalCopy", content);
@@ -560,11 +598,12 @@ public class DataIngestionService {
                 logger.error("Failed to process context for hashing", e);
             }
             results.add(item);
+            if (isAnalytics) counters.analyticsKept++; else counters.copyKept++;
         }
     }
 
     private String calculateContentHash(String content, String context) {
-        if (content == null || content.isEmpty()) return null;
+        if (content == null) return null; // Allow hashing of empty strings to differentiate from null
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             digest.update(content.getBytes(StandardCharsets.UTF_8));
@@ -603,9 +642,77 @@ public class DataIngestionService {
 
     private static String cleanseCopyText(String text) {
         if (text == null) return null;
-        String cleansed = text.replaceAll("\\{%.*?%\\}", " ");
+        String cleansed = text;
+        // Targeted replacements based on requested patterns
+        cleansed = NBSP_PATTERN.matcher(cleansed).replaceAll(" ");
+        cleansed = BR_PATTERN.matcher(cleansed).replaceAll(" ");
+        // Remove nested URL macro patterns first to avoid partial leftovers
+        cleansed = NESTED_URL_PATTERN.matcher(cleansed).replaceAll(" ");
+        // Then remove regular URL macro patterns
+        cleansed = URL_PATTERN.matcher(cleansed).replaceAll(" ");
+        // Remove metadata macro
+        cleansed = METADATA_PATTERN.matcher(cleansed).replaceAll(" ");
+
+        // Strip HTML tags
         cleansed = cleansed.replaceAll("<[^>]+?>", " ");
-        cleansed = cleansed.replaceAll("\s+", " ").trim();
+        // Normalize unicode NBSP if present
+        cleansed = cleansed.replace('\u00A0', ' ');
+        // Collapse whitespace
+        cleansed = cleansed.replaceAll("\\s+", " ").trim();
         return cleansed;
+    }
+
+    private boolean isAnalyticsItem(Map<String, Object> item) {
+        String type = (String) item.get("itemType");
+        return type != null && type.toLowerCase().contains("analytics");
+    }
+
+    private void processAnalyticsNode(JsonNode node, String fieldKey, Envelope env, Facets facets,
+                                      List<Map<String, Object>> results, IngestionCounters counters) {
+        if (node == null || node.isNull()) return;
+
+        if (node.isTextual() || node.isNumber() || node.isBoolean()) {
+            processContentField(node.asText(), fieldKey, env, facets, results, counters, true);
+            return;
+        }
+
+        if (node.isObject()) {
+            // Direct value
+            JsonNode valueNode = node.get("value");
+            if (valueNode != null && !valueNode.isNull()) {
+                processContentField(valueNode.asText(), fieldKey, env, facets, results, counters, true);
+            }
+            // Nested arrays commonly named 'items' or 'children' or 'child'
+            for (String childArrayKey : List.of("items", "children", "child")) {
+                JsonNode childArray = node.get(childArrayKey);
+                if (childArray != null && childArray.isArray()) {
+                    for (JsonNode child : childArray) {
+                        processAnalyticsNode(child, fieldKey, env, facets, results, counters);
+                    }
+                }
+            }
+            // Recurse into other fields to find nested 'value'
+            node.fields().forEachRemaining(e -> {
+                if (!List.of("items", "children", "child", "value").contains(e.getKey())) {
+                    processAnalyticsNode(e.getValue(), fieldKey, env, facets, results, counters);
+                }
+            });
+            return;
+        }
+
+        if (node.isArray()) {
+            for (JsonNode element : node) {
+                processAnalyticsNode(element, fieldKey, env, facets, results, counters);
+            }
+        }
+    }
+
+    private static class IngestionCounters {
+        long copyFound = 0;
+        long copyKept = 0;
+        long analyticsFound = 0;
+        long analyticsKept = 0;
+        long copyBlankKept = 0;
+        long analyticsBlankKept = 0;
     }
 }
