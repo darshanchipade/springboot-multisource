@@ -485,7 +485,8 @@ public class DataIngestionService {
                         currentEnvelope.setUsagePath(usagePath);
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
-                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()) {
+                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()
+                            && (!"url".equals(fieldKey) || allowUrlExtraction(fieldKey, fieldValue, currentEnvelope))) {
                         currentEnvelope.setUsagePath(usagePath);
                         processContentField(fieldValue.get("text").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
                     } else if (fieldValue.isObject() && fieldValue.has("url") && fieldValue.get("url").isTextual() && allowUrlExtraction(fieldKey, fieldValue, currentEnvelope)) {
