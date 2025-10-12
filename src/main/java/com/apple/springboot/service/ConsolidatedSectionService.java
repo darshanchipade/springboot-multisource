@@ -77,7 +77,12 @@ public class ConsolidatedSectionService {
                 section.setSectionUri(sectionUri);                   // fragment
                 section.setOriginalFieldName(item.getItemOriginalFieldName());
                 section.setCleansedText(item.getCleansedText());
-                contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                String usagePathLookup = usagePath;
+                contentHashRepository
+                        .findBySourcePathAndItemTypeAndUsagePath(
+                                item.getItemSourcePath(),
+                                item.getItemOriginalFieldName(),
+                                usagePathLookup)
                         .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
                 section.setSummary(item.getSummary());
                 section.setClassification(item.getClassification());

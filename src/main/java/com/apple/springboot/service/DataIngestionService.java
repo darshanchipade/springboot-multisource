@@ -393,12 +393,13 @@ public class DataIngestionService {
         for (Map<String, Object> item : allItems) {
             String sourcePath = (String) item.get("sourcePath");
             String itemType = (String) item.get("itemType");
+            String usagePath = (String) item.get("usagePath");
             String newContentHash = (String) item.get("contentHash");
             String newContextHash = (String) item.get("contextHash");
 
             if (sourcePath == null || itemType == null) continue;
 
-            Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemType(sourcePath, itemType);
+            Optional<ContentHash> existingHashOpt = contentHashRepository.findBySourcePathAndItemTypeAndUsagePath(sourcePath, itemType, usagePath);
             boolean contentChanged = existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContentHash(), newContentHash);
             boolean contextChanged = considerContextChange && (existingHashOpt.isEmpty() || !Objects.equals(existingHashOpt.get().getContextHash(), newContextHash));
             boolean changed = existingHashOpt.isEmpty() || contentChanged || contextChanged;
@@ -406,7 +407,7 @@ public class DataIngestionService {
                 changedItems.add(item);
             }
             // Always persist latest observed hashes for this (sourcePath,itemType)
-            ContentHash hashToSave = existingHashOpt.orElse(new ContentHash(sourcePath, itemType, null, null));
+            ContentHash hashToSave = existingHashOpt.orElse(new ContentHash(sourcePath, itemType, usagePath, null, null));
             hashToSave.setContentHash(newContentHash);
             hashToSave.setContextHash(newContextHash);
             contentHashRepository.save(hashToSave);
@@ -589,6 +590,7 @@ public class DataIngestionService {
             item.put("itemType", fieldKey);
             item.put("originalFieldName", fieldKey);
             item.put("model", envelope.getModel());
+            item.put("usagePath", envelope.getUsagePath());
             item.put("cleansedContent", cleansedContent);
             item.put("contentHash", calculateContentHash(cleansedContent, null));
             try {
