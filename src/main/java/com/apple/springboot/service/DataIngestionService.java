@@ -34,7 +34,7 @@ public class DataIngestionService {
     private final RawDataStoreRepository rawDataStoreRepository;
 
     private ContentHashingService contentHashingService;
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers");
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers", "text", "url");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
@@ -69,6 +69,20 @@ public class DataIngestionService {
     // If true, log debug counters for found vs kept
     @Value("${app.ingestion.debug-counters:true}")
     private boolean debugCountersEnabled;
+
+    // Include textual value from URL-like objects (object.text or object.url)
+    @Value("${app.ingestion.include-url-text:false}")
+    private boolean includeUrlText;
+
+    // Optional filters to gate URL-text extraction
+    @Value("${app.ingestion.url-text-include-models:}")
+    private String urlTextIncludeModelsCsv;
+
+    @Value("${app.ingestion.url-text-include-path-regex:}")
+    private String urlTextIncludePathRegex;
+
+    @Value("${app.ingestion.url-text-exclude-path-regex:}")
+    private String urlTextExcludePathRegex;
 
     // Copy cleansing patterns
     private static final Pattern NBSP_PATTERN = Pattern.compile("\\{%nbsp%\\}");
@@ -471,6 +485,12 @@ public class DataIngestionService {
                         currentEnvelope.setUsagePath(usagePath);
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
+                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(fieldValue.get("text").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
+                    } else if (fieldValue.isObject() && fieldValue.has("url") && fieldValue.get("url").isTextual() && allowUrlExtraction(fieldKey, fieldValue, currentEnvelope)) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(fieldValue.get("url").asText(), fieldKey, currentEnvelope, currentFacets, results, counters, false);
                     }else if ((fieldValue.isArray())){
                         // e.g., fieldKey == "disclaimers"
                         // element is each object inside disclaimers[]
@@ -553,6 +573,8 @@ public class DataIngestionService {
         Facets currentFacets = new Facets();
         currentFacets.putAll(parentFacets);
         currentFacets.remove("copy"); // Remove generic copy if it exists
+        currentFacets.remove("text"); // Avoid duplicating extracted text
+        currentFacets.remove("url");  // Avoid duplicating extracted url text
         currentNode.fields().forEachRemaining(entry -> {
             if (entry.getValue().isValueNode() && !entry.getKey().startsWith("_")) {
                 currentFacets.put(entry.getKey(), entry.getValue().asText());
@@ -667,6 +689,40 @@ public class DataIngestionService {
     private boolean isAnalyticsItem(Map<String, Object> item) {
         String type = (String) item.get("itemType");
         return type != null && type.toLowerCase().contains("analytics");
+    }
+
+    private boolean allowUrlExtraction(String fieldKey, JsonNode fieldValue, Envelope env) {
+        if (!includeUrlText) return false;
+
+        // If allowlist models provided, require model match
+        if (urlTextIncludeModelsCsv != null && !urlTextIncludeModelsCsv.isBlank()) {
+            Set<String> allowedModels = new HashSet<>();
+            for (String m : urlTextIncludeModelsCsv.split(",")) {
+                if (!m.isBlank()) allowedModels.add(m.trim());
+            }
+            String model = fieldValue.path("_model").asText(env.getModel());
+            if (!allowedModels.isEmpty() && (model == null || !allowedModels.contains(model))) {
+                return false;
+            }
+        }
+
+        // Path regex includes/excludes against current envelope sourcePath
+        String path = env.getSourcePath();
+        if (path == null) return true; // no path context; allow if flag set
+
+        if (urlTextExcludePathRegex != null && !urlTextExcludePathRegex.isBlank()) {
+            try {
+                if (Pattern.compile(urlTextExcludePathRegex).matcher(path).find()) return false;
+            } catch (Exception ignored) { }
+        }
+        if (urlTextIncludePathRegex != null && !urlTextIncludePathRegex.isBlank()) {
+            try {
+                return Pattern.compile(urlTextIncludePathRegex).matcher(path).find();
+            } catch (Exception ignored) {
+                return true; // if regex invalid, fall back to allow
+            }
+        }
+        return true;
     }
 
     private void processAnalyticsNode(JsonNode node, String fieldKey, Envelope env, Facets facets,
