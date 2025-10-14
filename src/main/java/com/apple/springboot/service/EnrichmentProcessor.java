@@ -29,7 +29,8 @@ public class EnrichmentProcessor {
     private final ConsolidatedSectionService consolidatedSectionService;
     private final TextChunkingService textChunkingService;
     private final ContentChunkRepository contentChunkRepository;
-    private final RateLimiter bedrockRateLimiter;
+    private final RateLimiter bedrockChatRateLimiter;
+    private final RateLimiter bedrockEmbedRateLimiter;
     private final EnrichmentPersistenceService persistenceService;
     private final AIResponseValidator aiResponseValidator;
     private final ObjectMapper objectMapper;
@@ -42,7 +43,8 @@ public class EnrichmentProcessor {
                                ConsolidatedSectionService consolidatedSectionService,
                                TextChunkingService textChunkingService,
                                ContentChunkRepository contentChunkRepository,
-                               RateLimiter bedrockRateLimiter,
+                               RateLimiter bedrockChatRateLimiter,
+                               RateLimiter bedrockEmbedRateLimiter,
                                EnrichmentPersistenceService persistenceService,
                                AIResponseValidator aiResponseValidator,
                                ObjectMapper objectMapper) {
@@ -52,7 +54,8 @@ public class EnrichmentProcessor {
         this.consolidatedSectionService = consolidatedSectionService;
         this.textChunkingService = textChunkingService;
         this.contentChunkRepository = contentChunkRepository;
-        this.bedrockRateLimiter = bedrockRateLimiter;
+        this.bedrockChatRateLimiter = bedrockChatRateLimiter;
+        this.bedrockEmbedRateLimiter = bedrockEmbedRateLimiter;
         this.persistenceService = persistenceService;
         this.aiResponseValidator = aiResponseValidator;
         this.objectMapper = objectMapper;
@@ -60,8 +63,7 @@ public class EnrichmentProcessor {
 
     // This method is NO LONGER @Transactional
     public void process(EnrichmentMessage message) {
-        // This is a blocking call that will wait until a permit is available.
-        bedrockRateLimiter.acquire();
+        // Bedrock rate limiting is enforced inside BedrockEnrichmentService per operation
 
         CleansedItemDetail itemDetail = message.getCleansedItemDetail();
         UUID cleansedDataStoreId = message.getCleansedDataStoreId();
@@ -104,6 +106,11 @@ public class EnrichmentProcessor {
                     persistenceService.saveEnrichedElement(itemDetail, cleansedDataEntry, enrichmentResultsFromBedrock, "ENRICHED");
                 }
             }
+        } catch (ThrottledException te) {
+            // Persist error but DO NOT rethrow; ensures completion and consolidation proceed
+            logger.warn("Bedrock throttling for item (CleansedDataStore ID: {}, item path: {}). Persisting error and continuing.",
+                    cleansedDataStoreId, itemDetail.sourcePath);
+            persistenceService.saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_ENRICHMENT_FAILED", "Throttled after retries");
         } catch (Exception e) {
             logger.error("Critical error during enrichment for item (CleansedDataStore ID: {}, item path: {}): {}", cleansedDataStoreId, itemDetail.sourcePath, e.getMessage(), e);
             persistenceService.saveErrorEnrichedElement(itemDetail, cleansedDataEntry, "ERROR_UNEXPECTED", e.getMessage());
@@ -114,12 +121,30 @@ public class EnrichmentProcessor {
     }
 
     private void checkCompletion(CleansedDataStore cleansedDataEntry) {
-        long totalItems = cleansedDataEntry.getCleansedItems().size();
+        // Use distinct (sourcePath, originalFieldName) pairs as expected count to account for idempotent upserts
+        long expectedDistinct = 0L;
+        try {
+            java.util.Set<String> keys = new java.util.HashSet<>();
+            List<java.util.Map<String, Object>> items = cleansedDataEntry.getCleansedItems();
+            if (items != null) {
+                for (java.util.Map<String, Object> item : items) {
+                    Object sp = item.get("sourcePath");
+                    Object ofn = item.get("originalFieldName");
+                    if (sp != null && ofn != null) {
+                        keys.add(sp.toString() + "||" + ofn.toString());
+                    }
+                }
+            }
+            expectedDistinct = keys.size();
+        } catch (Exception ignored) {
+            expectedDistinct = cleansedDataEntry.getCleansedItems() != null ? cleansedDataEntry.getCleansedItems().size() : 0L;
+        }
+
         long processedCount = enrichedContentElementRepository.countByCleansedDataId(cleansedDataEntry.getId());
 
-        logger.trace("Completion check for {}: {}/{} items processed.", cleansedDataEntry.getId(), processedCount, totalItems);
+        logger.trace("Completion check for {}: {}/{} items processed.", cleansedDataEntry.getId(), processedCount, expectedDistinct);
 
-        if (processedCount >= totalItems) {
+        if (processedCount >= expectedDistinct && expectedDistinct > 0) {
             logger.info("All items for CleansedDataStore ID {} have been processed. Running finalization steps.", cleansedDataEntry.getId());
             runFinalizationSteps(cleansedDataEntry);
         }
@@ -132,24 +157,30 @@ public class EnrichmentProcessor {
 
         List<ConsolidatedEnrichedSection> savedSections = consolidatedSectionService.getSectionsFor(cleansedDataEntry);
         for (ConsolidatedEnrichedSection section : savedSections) {
+            // Option B: replace chunks for this section on every update
+            try {
+                contentChunkRepository.deleteAllByConsolidatedEnrichedSectionId(section.getId());
+            } catch (Exception e) {
+                logger.warn("Failed to delete existing chunks for section {}. Continuing with re-chunk.", section.getId(), e);
+            }
+
             List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
             for (String chunkText : chunks) {
+                float[] vector = null;
                 try {
-                    // This call also needs to be rate-limited
-                    bedrockRateLimiter.acquire();
-                    float[] vector = bedrockEnrichmentService.generateEmbedding(chunkText);
-                    ContentChunk contentChunk = new ContentChunk();
-                    contentChunk.setConsolidatedEnrichedSection(section);
-                    contentChunk.setChunkText(chunkText);
-                    contentChunk.setSourceField(section.getSourceUri());
-                    contentChunk.setSectionPath(section.getSectionPath());
-                    contentChunk.setVector(vector);
-                    contentChunk.setCreatedAt(OffsetDateTime.now());
-                    contentChunk.setCreatedBy("EnrichmentPipelineService");
-                    contentChunkRepository.save(contentChunk);
+                    vector = bedrockEnrichmentService.generateEmbedding(chunkText);
                 } catch (Exception e) {
-                    logger.error("Error creating content chunk for item path {}: {}", section.getSectionPath(), e.getMessage(), e);
+                    logger.warn("Embedding failed for section {}. Saving chunk without vector.", section.getSectionPath(), e);
                 }
+                ContentChunk contentChunk = new ContentChunk();
+                contentChunk.setConsolidatedEnrichedSection(section);
+                contentChunk.setChunkText(chunkText);
+                contentChunk.setSourceField(section.getSourceUri());
+                contentChunk.setSectionPath(section.getSectionPath());
+                contentChunk.setVector(vector); // may be null
+                contentChunk.setCreatedAt(OffsetDateTime.now());
+                contentChunk.setCreatedBy("EnrichmentPipelineService");
+                contentChunkRepository.save(contentChunk);
             }
         }
         updateFinalCleansedDataStatus(cleansedDataEntry);

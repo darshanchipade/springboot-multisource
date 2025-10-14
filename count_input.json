@@ -1,0 +1,517 @@
+{
+  "_path": "/content/dam/applecom-cms/live/en_US/ipad/ipad-family",
+  "_model": "web-page",
+  "pageId": "ipad",
+  "layoutId": "overview",
+  "content": {
+    "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/webpage-content",
+    "_model": "web-page-content",
+    "sections": [
+      {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section",
+        "_modelname": "ChapterNavSectionModel",
+        "_model": "chapter-nav-section",
+        "items": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro",
+            "_model": "chapter-nav-item",
+            "link": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro-items/link",
+              "_model": "link",
+              "text": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/test/test-27th-march",
+                "_model": "markdown-inline-copy",
+                "textType": "markdown",
+                "metadata": [],
+                "_id": "cdfa3a68068dd402422977b4dca93da917358608edfa642c40f6ddd0f4fc069f",
+                "copy": "Test_26th_march UpdatedTest",
+                "_meta": []
+              },
+              "url": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro-items/link-items/url",
+                "_model": "plain-text-copy",
+                "textType": "plainText",
+                "metadata": [],
+                "_id": "60885a043082d7a0ba374f09000ee8bc22caf9f5cbf473ea69923b7769c7b9e6",
+                "copy": "/ipad-pro/",
+                "_meta": []
+              },
+              "destinationType": "internal",
+              "analyticsAttributes": [
+                {
+                  "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro-items/link-items/ac-title",
+                  "_model": "analytics",
+                  "name": "data-analytics-title",
+                  "value": "ipad pro",
+                  "_id": "125efcb91cb76243080eced08008f57e65b46c1f47216bc8a03ceec34483e7df"
+                }
+              ],
+              "_id": "c3f91bc9b79317b8d87c4ca54cf1f0a5176be16ea083ea985861c9a8958a2022"
+            },
+            "image": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro-items/svg-set",
+              "_model": "asset-set",
+              "viewportSmall": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-pro-items/svg-set-items/icon-s",
+                "_model": "inert-svg-image",
+                "uri": "/assets-www/en_WW/ipad/chapternav/ipad_pro_b05b29e18.svg",
+                "_id": "36d0c9d2a39d27d896e3cc1adf1e5992af22ca5759fd05fddf68249aac131fb4",
+                "_uri_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/chapternav/ipad_pro.svg",
+                "width": 41,
+                "height": 56
+              },
+              "_id": "3b71338d0c712dba795e3a255414d72f48b8d2decb219d4f7196a5abc27c8829"
+            },
+            "_id": "9b61f7cb7e235436302052af796eda01ee4f9c43ceb58092528aec27d1ad5517"
+          },
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air",
+            "_model": "chapter-nav-item",
+            "badge": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/new-badge",
+              "_model": "badge",
+              "copy": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/badge/new",
+                "_model": "markdown-inline-copy",
+                "textType": "markdown",
+                "metadata": [],
+                "_id": "12e00e716ef85844c3e08fbbcd8c9b0453a69e829cff1a5efeb87737d7c633a2",
+                "copy": "New",
+                "_meta": []
+              },
+              "color": "#bf4800",
+              "_id": "38105b40bc2e7d4809519fc74db93d59326b4d82d582808a1260a46684cbb1c7"
+            },
+            "link": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/link",
+              "_model": "link",
+              "text": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/lob/ipad-air",
+                "_model": "markdown-inline-copy",
+                "textType": "markdown",
+                "metadata": [],
+                "_id": "3b3920bd519ee6c37bed42208e3531c67c49c1a118cff71a590a7abcf849d258",
+                "copy": "iPad{%nbsp%}Air",
+                "_meta": []
+              },
+              "url": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/link-items/url",
+                "_model": "plain-text-copy",
+                "textType": "plainText",
+                "metadata": [],
+                "_id": "e71a8d47501bfbcb31c1655816c3e6b7663cc529c32deabe1a35e6237c2c1576",
+                "copy": "/ipad-air/",
+                "_meta": []
+              },
+              "destinationType": "internal",
+              "analyticsAttributes": [
+                {
+                  "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/link-items/ac-title",
+                  "_model": "analytics",
+                  "name": "data-analytics-title",
+                  "value": "ipad air",
+                  "_id": "5e7ba088be091e56c27b9e19e21099968b3ac283aa869636e7eaeeca1da01745"
+                }
+              ],
+              "_id": "acaf94f099acb35dd13d8c2440161380f8cd3170b1af9b0a772beb9d5fb72039"
+            },
+            "image": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/svg-set",
+              "_model": "asset-set",
+              "viewportSmall": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-air-items/svg-set-items/icon-s",
+                "_model": "inert-svg-image",
+                "uri": "/assets-www/en_WW/ipad/chapternav/ipad_air_b05b29e18.svg",
+                "_id": "c66ee374294b0f10d1aeaaa22734488cf5b7bc8250efa960a480a725d68cbd94",
+                "_uri_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/chapternav/ipad_air.svg",
+                "width": 41,
+                "height": 56
+              },
+              "_id": "c1633c713e3201b4795913c9d50b273a0205a6337be6bee72ec0719edd5a81aa"
+            },
+            "_id": "7fdfa199f114f5b9e2390b49201713c22548def2ef4ca081fd758fa578da5053"
+          },
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad",
+            "_model": "chapter-nav-item",
+            "badge": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/new-badge",
+              "_model": "badge",
+              "copy": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/badge/new",
+                "_model": "markdown-inline-copy",
+                "categories": [
+                  "applecom-cms:categories/26th_march_legal",
+                  "legal"
+                ],
+                "textType": "markdown",
+                "metadata": [
+                  "3dfc5c8851f4c10bddce1ccacc25c1c775bd05e84fbfac63cc4b67f357f68a46"
+                ],
+                "_id": "18abe60f622138b3f6f4cbeb891e88c89d212e3ad3b8e544ea3059a49c5992a1",
+                "copy": "iPad test-videoheader-reconcile-demo{% metadata=\"1\" %}",
+                "_meta": [
+                  {
+                    "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/test/inline-copy",
+                    "_model": "markdown-inline-copy",
+                    "categories": [
+                      "applecom-cms:categories/26th_march_legal"
+                    ],
+                    "textType": "markdown",
+                    "metadata": [],
+                    "_id": "3dfc5c8851f4c10bddce1ccacc25c1c775bd05e84fbfac63cc4b67f357f68a46",
+                    "copy": "Test_26th_march Updated"
+                  }
+                ]
+              },
+              "color": "#bf4800",
+              "_id": "c2ad6516aedefd2e9b0a3ca7d3823e89a1f15beb02b7f13df523fd75df266f31"
+            },
+            "link": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/link",
+              "_model": "link",
+              "text": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/lob/ipad",
+                "_model": "markdown-inline-copy",
+                "categories": [
+                  "applecom-cms:categories/26th_march_legal"
+                ],
+                "textType": "markdown",
+                "metadata": [],
+                "_id": "18abe60f622138b3f6f4cbeb891e88c89d212e3ad3b8e544ea3059a49c5992a1",
+                "copy": "iPad test-videoheader-reconcile-demo{% metadata=\"1\" %}",
+                "_meta": [
+                  {
+                    "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/test/inline-copy",
+                    "_model": "markdown-inline-copy",
+                    "categories": [
+                      "applecom-cms:categories/26th_march_legal"
+                    ],
+                    "textType": "markdown",
+                    "metadata": [],
+                    "_id": "3dfc5c8851f4c10bddce1ccacc25c1c775bd05e84fbfac63cc4b67f357f68a46",
+                    "copy": "Test_26th_march Updated"
+                  }
+                ]
+              },
+              "url": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/link-items/url",
+                "_model": "plain-text-copy",
+                "textType": "plainText",
+                "metadata": [],
+                "_id": "e58d898cee40acf074ca90d021d466845331154a928b18b650a8526bc10d3a72",
+                "copy": "/ipad-10.9/",
+                "_meta": []
+              },
+              "destinationType": "internal",
+              "analyticsAttributes": [
+                {
+                  "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/link-items/ac-title",
+                  "_model": "analytics",
+                  "name": "data-analytics-title",
+                  "value": "ipad",
+                  "_id": "60632d683871b1cc88e0be3e702db343aff2069b56fe37e3a6dd21405b86c371"
+                }
+              ],
+              "_id": "eda2387a77513f78610075669baa26d191b41dbffd541a56e902f2d68791e34f"
+            },
+            "image": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/svg-set",
+              "_model": "asset-set",
+              "viewportSmall": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ipad-items/svg-set-items/icon-s",
+                "_model": "inert-svg-image",
+                "uri": "/assets-www/en_WW/ipad/chapternav/ipad_ec6ec9ee7.svg",
+                "_id": "002d5a706622802520ea6264ed37b1117ffe86b5329f70cd99eaf2a74aff3836",
+                "_uri_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/chapternav/ipad.svg",
+                "width": 30,
+                "height": 56
+              },
+              "_id": "5a6364013ffe9e2bda9af441e2bc781d6f8144e737c00b369bfe7e3623163811"
+            },
+            "_id": "40b3074e05fcaec830cb2ceb4d2f8f645c5f567f56e302ec90f534f4b843e130"
+          }
+        ],
+        "accessibilityText": {
+          "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/chapter-nav-section/section-a11y",
+          "_model": "plain-text-copy",
+          "textType": "plainText",
+          "metadata": [],
+          "_id": "fe0a7037fa6208b7e384fb6068fbd69f2117fc251ae4a2e59d12109f6edb1c07",
+          "copy": "iPad family of products 23rd april 2025",
+          "_meta": []
+        },
+        "analyticsAttributes": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/ac-activitymap-region-id",
+            "_model": "analytics",
+            "name": "applecom-cms:analytics/26th_march_test",
+            "value": "family browser",
+            "_id": "bef32e32d5cde770412a9d3f115c34ac5b81ff6543004a4a42f1ba92e4d147aa"
+          }
+        ],
+        "paddleNav": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/chapter-nav-section-items/previous",
+            "_model": "action-handler",
+            "action": "previous",
+            "accessibilityText": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/chapter-nav-section/previous-a11y",
+              "_model": "plain-text-copy",
+              "textType": "plainText",
+              "metadata": [],
+              "_id": "7a4f328217ba03f1c79f26eaa1e47a046bf4a6b16914f15d1eeea34601fb5568",
+              "copy": "Previous iPad family of products",
+              "_meta": []
+            },
+            "_id": "b31986118fba949ba44bcfa79b0faaf6f0c4c5830bfacec00cb2a9f3cfec8e50"
+          }
+        ],
+        "_id": "0abaec9eb6e4d402c1ae65c120bae878105480cc87c053d2ed543fcaff0f561d"
+      },
+      {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section",
+        "_modelname": "RibbonSectionModel",
+        "_hidden": false,
+        "_model": "ribbon-section",
+        "ribbons": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section-items/financing",
+            "_modelname": "RibbonModel",
+            "_hidden": false,
+            "_model": "ribbon",
+            "title": "financing",
+            "copy": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/ribbon-section/financing/copy",
+              "_hidden": false,
+              "_model": "markdown-inline-copy",
+              "categories": [
+                "applecom-cms:categories/financing"
+              ],
+              "textType": "markdown",
+              "metadata": [
+                "250ac3177dc2f5f9d11db761e1ac01b7c5af10456fe310e1a66092265cc47f61"
+              ],
+              "_id": "99d24f67543a760b060e6c8e57caa70ec27c8ec233fabdaa9390fb9a8fe948ea",
+              "copy": "Get 3% Daily Cash back with Apple{%nbsp%}Card. And pay for your new iPad over 12 months, interest-free when you choose to check out with Apple{%nbsp%}Card Monthly Installments.{%sosumi type=\"external\" metadata=\"1\"%}",
+              "_meta": [
+                {
+                  "_path": "/content/dam/applecom-cms/live/en_US/global-legal/financing/acmi-detailed",
+                  "_model": "markdown-inline-copy",
+                  "categories": [
+                    "legal"
+                  ],
+                  "textType": "markdown",
+                  "metadata": [
+                    "94c08ee30d2b3082401ae88a80e03f1f01bfd56a76c19b831ca2812f1841171d",
+                    "96b62229a1705cf0f376e1aea533fb89c4d086cb6bd7cc24e884fcb01d3ce79e",
+                    "c4f1688ac418d6f55590586382769e485f85b02d2570ee0d4bf4125ca17fc4a6",
+                    "779e487f646b0b763e8afe49b062081d9792ee390982d507fa39d30126078117",
+                    "1670df75c08ffa0d3e06a9c23af5b58518184a2a7fc8c3b2654e41474c474ff5"
+                  ],
+                  "_id": "250ac3177dc2f5f9d11db761e1ac01b7c5af10456fe310e1a66092265cc47f61",
+                  "copy": "Apple{%nbsp%}Card Monthly Installments (ACMI) is a 0% APR payment option..."
+                }
+              ]
+            },
+            "link": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section-items/financing-items/inline-link",
+              "_hidden": false,
+              "_model": "link",
+              "text": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/ribbon-section/financing/inline-link",
+                "_hidden": false,
+                "_model": "markdown-inline-copy",
+                "textType": "markdown",
+                "metadata": [],
+                "_id": "75682cd1bbebec273190a1ba84be09b9e09bfdc6e508778cf1b13d62a07f7b99",
+                "copy": "Learn more",
+                "_meta": []
+              },
+              "url": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section-items/financing-items/inline-link-items/url",
+                "_hidden": false,
+                "_model": "plain-text-copy",
+                "textType": "plainText",
+                "metadata": [],
+                "_id": "badd541d40d9797a5a71323abe364028f94c37cccec161cd5059316ee4378504",
+                "copy": "/apple-card/monthly-installments/",
+                "_meta": []
+              },
+              "destinationType": "internal",
+              "accessibilityText": {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/ribbon-section/financing/a11y",
+                "_hidden": false,
+                "_model": "plain-text-copy",
+                "textType": "plainText",
+                "metadata": [],
+                "_id": "fa39c64502d74884f09e4fce8074e9ecebf695e40844514817a0fec327c36287",
+                "copy": "Learn more about daily cash back with Apple Card",
+                "_meta": []
+              },
+              "analyticsAttributes": [
+                {
+                  "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section-items/financing-items/inline-link-items/ac-title",
+                  "_hidden": false,
+                  "_model": "analytics",
+                  "name": "data-analytics-title",
+                  "value": "learn more - daily cash back with apple card ",
+                  "_id": "d23c4f8ac4a81b629fe864f10e536712b39c6cbd8175098961765fb3f2c2d1cb"
+                }
+              ],
+              "_id": "b01a37914f28b069ad7ded9fb7e25fe7dca6c8d9dca60b38cab5403493985e47"
+            },
+            "background": "neutral",
+            "layout": "base-full-width",
+            "introAnimation": "drop",
+            "analyticsAttributes": [
+              {
+                "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/ribbon-section-items/financing-items/ac-activitymap-region-id",
+                "_hidden": false,
+                "_model": "analytics",
+                "name": "data-analytics-activitymap-region-id",
+                "value": "ribbon",
+                "_id": "494daeab806a0134a8b2688b254600fef4f4a59930b3dd239f5a58d22a0e71f8"
+              }
+            ],
+            "_id": "1b1830b44b3abbe03afbb4d34aef47c4c756871b7452105a78f8d48e484a77d6"
+          }
+        ],
+        "_id": "d6befc5dae632657655f5bc28b5a2c8f0f7c236d514033b773bfc8f99dd272a4"
+      },
+      {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section",
+        "_modelname": "FeatureVideoHeaderSectionModel",
+        "_model": "feature-video-header-section",
+        "headline": {
+          "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/common/lob/ipad",
+          "_model": "markdown-inline-copy",
+          "categories": [
+            "applecom-cms:categories/26th_march_legal",
+            "legal"
+          ],
+          "textType": "markdown",
+          "metadata": [
+            "3dfc5c8851f4c10bddce1ccacc25c1c775bd05e84fbfac63cc4b67f357f68a46"
+          ],
+          "_id": "18abe60f622138b3f6f4cbeb891e88c89d212e3ad3b8e544ea3059a49c5992a1",
+          "copy": "iPad test-videoheader-reconcile-demo{% metadata=\"1\" %}",
+          "_meta": [
+            {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/test/inline-copy",
+              "_model": "markdown-inline-copy",
+              "categories": [
+                "applecom-cms:categories/26th_march_legal"
+              ],
+              "textType": "markdown",
+              "metadata": [],
+              "_id": "3dfc5c8851f4c10bddce1ccacc25c1c775bd05e84fbfac63cc4b67f357f68a46",
+              "copy": "Test_26th_march Updated"
+            }
+          ]
+        },
+        "statement": {
+          "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/video-header-section/statement",
+          "_model": "markdown-inline-copy",
+          "textType": "markdown",
+          "metadata": [],
+          "_id": "19ddda73acd0b35900d67ace9f17a09427d3b1088aaa1b6f3197f71874e8c2af",
+          "copy": "Touch, draw, and type{%br%}on one magical device.Test",
+          "_meta": []
+        },
+        "video": {
+          "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section-items/inline-video-set",
+          "_model": "asset-set",
+          "accessibilityText": {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/video-header-section/video-alt-text",
+            "_model": "plain-text-copy",
+            "textType": "plainText",
+            "metadata": [],
+            "_id": "f32c42d482b15aeddc03f9e4d11c62150a71b423d380a3132fd82fbb638b424a",
+            "copy": "Animation showcasing iPad Air\n iPad Pro\n iPad\n iPad mini\n Apple Pencil\n and Magic Keyboard.",
+            "_meta": []
+          },
+          "alt": {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/video-header-section/video-alt-text",
+            "_model": "plain-text-copy",
+            "textType": "plainText",
+            "metadata": [],
+            "_id": "f32c42d482b15aeddc03f9e4d11c62150a71b423d380a3132fd82fbb638b424a",
+            "copy": "Animation showcasing iPad Air\n iPad Pro\n iPad\n iPad mini\n Apple Pencil\n and Magic Keyboard.",
+            "_meta": []
+          },
+          "viewportSmall": {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section-items/inline-video-set-items/video-s",
+            "_model": "inline-video",
+            "uri1x": "/assets-www/en_WW/ipad/welcome/66b39244b_small.mp4",
+            "uri2x": "/assets-www/en_WW/ipad/welcome/56a685f6b_small_2x.mp4",
+            "width1x": 480,
+            "height1x": 600,
+            "width2x": 960,
+            "height2x": 1200,
+            "pinning": "top",
+            "fallbackImage": {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section-items/inline-video-set-items/fallback-image-set-items/fallback-image-s",
+              "_model": "pinnable-image",
+              "uri1x": "/assets-www/en_WW/ipad/welcome/welcome_hero_endframe_e6757fcbe_small.jpg",
+              "uri2x": "/assets-www/en_WW/ipad/welcome/welcome_hero_endframe_52fc1d508_small_2x.jpg",
+              "pinning": "top",
+              "_id": "2c9b9bc7121980f7539805f2ad52dc99f411c0e9327d1107245a197abf7fb231",
+              "_uri1x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/welcome/static/welcome_hero_endframe_small.jpg",
+              "width1x": 480,
+              "height1x": 600,
+              "_uri2x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/welcome/static/welcome_hero_endframe_small_2x.jpg",
+              "width2x": 960,
+              "height2x": 1200
+            },
+            "_id": "5d4765662bca1325adcb01c8fde1c2f3bca8ab6f317950e3452c9dc02876450f",
+            "_uri1x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/welcome/small.mp4",
+            "_uri2x_path": "/content/dam/applecom-cms/live/assets/en_WW/ipad/welcome/small_2x.mp4"
+          },
+          "analyticsAttributes": [
+            {
+              "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section-items/inline-video-set-items/ac-activitymap-region-id",
+              "_model": "analytics",
+              "name": "data-analytics-activitymap-region-id",
+              "value": "welcome animation video",
+              "_id": "988b7b173211cfd9465b9e8526bd57a9d1fa48220e8e3bfef59df5a78d0119c9"
+            }
+          ],
+          "_id": "bcbb1192551dab487723b1146bf3295f0d593afd9bca5c8fedd697a8fa2eb895"
+        },
+        "analyticsAttributes": [
+          {
+            "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/video-header-section-items/ac-section-engagement",
+            "_model": "analytics",
+            "name": "data-analytics-section-engagement",
+            "value": "name:hero",
+            "_id": "e8894e58e5f37fc0c208bf85e966e516046d1635297c9a9acd7fa13652c5fe28"
+          }
+        ],
+        "_id": "66cf5d9e7491d180d8d2db881bd177e14ef560f1ae8c8a1d775d25bd2ad3ddeb"
+      }
+    ]
+  },
+  "properties": {
+    "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/webpage-properties",
+    "_model": "web-page-properties",
+    "description": {
+      "_path": "/content/dam/applecom-cms/live/en_US/ipad/content/ipad-family/webpage-properties/description",
+      "_model": "plain-text-copy",
+      "textType": "plainText",
+      "metadata": [],
+      "_id": "273466c97441af56c67fd616570fe21255db5cf917ce3c1ff9f9080e4c93d9f8",
+      "copy": "Explore the world of iPad. Featuring iPad Pro\n iPad Air\n iPad mini with Apple Intelligence\n and iPad.",
+      "_meta": []
+    },
+    "analyticsAttributes": [
+      {
+        "_path": "/content/dam/applecom-cms/live/en_US/ipad/composition/ipad-family-items/webpage-properties-items/ac-page-analytics",
+        "_model": "analytics",
+        "name": "data-analytics-activitymap-region-id",
+        "value": "ipad family page",
+        "_id": "ef210983cb041bfe2fb78f505ba72ca990dd5a6e928634db5ca282f75ca6c3dc"
+      }
+    ]
+  }
+}

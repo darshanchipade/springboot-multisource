@@ -6,25 +6,26 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.BedrockRuntimeException;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class BedrockEnrichmentService {
@@ -33,29 +34,29 @@ public class BedrockEnrichmentService {
     private final BedrockRuntimeClient bedrockClient;
     private final ObjectMapper objectMapper;
     private final String bedrockModelId;
-    private final String bedrockRegion;
     private final String embeddingModelId;
+    private final RateLimiter chatRateLimiter;
+    private final RateLimiter embedRateLimiter;
+    private final int bedrockMaxTokens;
 
     @Autowired
-    public BedrockEnrichmentService(ObjectMapper objectMapper,
-                                    @Value("${aws.region}") String region,
-                                    @Value("${aws.bedrock.modelId}") String modelId,
-                                    @Value("${aws.bedrock.embeddingModelId}") String embeddingModelId) {
+    public BedrockEnrichmentService(
+            ObjectMapper objectMapper,
+            BedrockRuntimeClient bedrockRuntimeClient,
+            @Value("${aws.bedrock.modelId}") String modelId,
+            @Value("${aws.bedrock.embeddingModelId}") String embeddingModelId,
+            @Value("${app.bedrock.maxTokens:1024}") int maxTokens,
+            RateLimiter bedrockChatRateLimiter,
+            RateLimiter bedrockEmbedRateLimiter
+    ) {
         this.objectMapper = objectMapper;
-        this.bedrockRegion = region;
+        this.bedrockClient = bedrockRuntimeClient;
         this.bedrockModelId = modelId;
         this.embeddingModelId = embeddingModelId;
-
-        if (region == null) {
-            logger.error("AWS Region for Bedrock is null. Cannot initialize BedrockRuntimeClient.");
-            throw new IllegalArgumentException("AWS Region for Bedrock must not be null.");
-        }
-
-        this.bedrockClient = BedrockRuntimeClient.builder()
-                .region(Region.of(this.bedrockRegion))
-                .credentialsProvider(DefaultCredentialsProvider.create())
-                .build();
-        logger.info("BedrockEnrichmentService initialized with region: {} and model ID: {}", this.bedrockRegion, this.bedrockModelId);
+        this.chatRateLimiter = bedrockChatRateLimiter;
+        this.embedRateLimiter = bedrockEmbedRateLimiter;
+        this.bedrockMaxTokens = Math.max(128, maxTokens);
+        logger.info("BedrockEnrichmentService initialized with model ID: {} and embed model: {}", this.bedrockModelId, this.embeddingModelId);
     }
 
     public String getConfiguredModelId() {
@@ -63,27 +64,32 @@ public class BedrockEnrichmentService {
     }
 
     public float[] generateEmbedding(String text) throws IOException {
+        if (embedRateLimiter != null) embedRateLimiter.acquire();
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("inputText", text);
-
         String payloadJson = objectMapper.writeValueAsString(payload);
         SdkBytes body = SdkBytes.fromUtf8String(payloadJson);
-
         InvokeModelRequest request = InvokeModelRequest.builder()
                 .modelId(embeddingModelId)
                 .contentType("application/json")
                 .accept("application/json")
                 .body(body)
                 .build();
-
-        InvokeModelResponse response = bedrockClient.invokeModel(request);
-        JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
-        JsonNode embeddingNode = responseJson.get("embedding");
-        float[] embedding = new float[embeddingNode.size()];
-        for (int i = 0; i < embeddingNode.size(); i++) {
-            embedding[i] = embeddingNode.get(i).floatValue();
+        try {
+            InvokeModelResponse response = invokeWithRetry(request, true);
+            JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
+            JsonNode embeddingNode = responseJson.get("embedding");
+            float[] embedding = new float[embeddingNode.size()];
+            for (int i = 0; i < embeddingNode.size(); i++) {
+                embedding[i] = embeddingNode.get(i).floatValue();
+            }
+            return embedding;
+        } catch (ThrottledException te) {
+            throw te;
+        } catch (BedrockRuntimeException e) {
+            logger.error("Bedrock API error during embedding generation: {}", e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage(), e);
+            throw new IOException("Bedrock API error during embedding generation.", e);
         }
-        return embedding;
     }
 
     private String createEnrichmentPrompt(JsonNode itemContent, EnrichmentContext context) throws JsonProcessingException {
@@ -125,7 +131,7 @@ public class BedrockEnrichmentService {
 
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("anthropic_version", "bedrock-2023-05-31");
-            payload.put("max_tokens", 4096);
+            payload.put("max_tokens", bedrockMaxTokens);
             List<ObjectNode> messages = new ArrayList<>();
             ObjectNode userMessage = objectMapper.createObjectNode();
             userMessage.put("role", "user");
@@ -144,7 +150,11 @@ public class BedrockEnrichmentService {
                     .build();
 
             logger.debug("Bedrock InvokeModel Request for path {}: {}", sourcePath, payloadJson);
-            InvokeModelResponse response = bedrockClient.invokeModel(request);
+            // Rate-limit chat/completion separately
+            if (chatRateLimiter != null) {
+                chatRateLimiter.acquire();
+            }
+            InvokeModelResponse response = invokeWithRetry(request, false);
             String responseBodyString = response.body().asUtf8String();
             logger.debug("Bedrock InvokeModel Response Body for path {}: {}", sourcePath, responseBodyString);
 
@@ -182,6 +192,9 @@ public class BedrockEnrichmentService {
                 results.put("error", "Bedrock response structure unexpected");
                 results.put("raw_bedrock_response", responseBodyString);
             }
+        } catch (ThrottledException te) {
+            // Surface throttling so caller can retry via SQS visibility timeout
+            throw te;
         } catch (BedrockRuntimeException e) {
             logger.error("Bedrock API error during enrichment for model {}: {}", effectiveModelId, e.awsErrorDetails().errorMessage(), e);
             results.put("error", "Bedrock API error: " + e.awsErrorDetails().errorMessage());
@@ -237,7 +250,10 @@ public class BedrockEnrichmentService {
                 .build();
 
         try {
-            InvokeModelResponse response = bedrockClient.invokeModel(request);
+            if (embedRateLimiter != null) {
+                embedRateLimiter.acquire();
+            }
+            InvokeModelResponse response = invokeWithRetry(request, true);
             JsonNode responseJson = objectMapper.readTree(response.body().asUtf8String());
             JsonNode embeddingsNode = responseJson.get("embedding");
 
@@ -252,5 +268,38 @@ public class BedrockEnrichmentService {
             throw new IOException("Bedrock API error during batch embedding.", e);
         }
         return allEmbeddings;
+    }
+
+    private InvokeModelResponse invokeWithRetry(InvokeModelRequest request, boolean isEmbedding) {
+        int maxAttempts = 6;
+        long baseBackoffMs = isEmbedding ? 400L : 800L;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return bedrockClient.invokeModel(request);
+            } catch (BedrockRuntimeException e) {
+                String errorCode = e.awsErrorDetails() != null ? e.awsErrorDetails().errorCode() : null;
+                int statusCode = e.statusCode();
+                boolean throttled = statusCode == 429 || "ThrottlingException".equalsIgnoreCase(errorCode)
+                        || "TooManyRequestsException".equalsIgnoreCase(errorCode)
+                        || "ProvisionedThroughputExceededException".equalsIgnoreCase(errorCode);
+                if (!throttled || attempt == maxAttempts) {
+                    if (throttled) {
+                        throw new ThrottledException("Bedrock throttling after retries", e);
+                    }
+                    throw e;
+                }
+                long jitter = ThreadLocalRandom.current().nextLong(50, 200);
+                long sleepMs = (long) Math.min(10_000, baseBackoffMs * Math.pow(2, attempt - 1) + jitter);
+                logger.warn("Bedrock throttled (attempt {}/{}). Backing off for {} ms. Error: {}",
+                        attempt, maxAttempts, sleepMs, e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage());
+                try {
+                    Thread.sleep(sleepMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during backoff", ie);
+                }
+            }
+        }
+        throw new RuntimeException("Unreachable");
     }
 }
