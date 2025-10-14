@@ -34,7 +34,7 @@ public class DataIngestionService {
     private final RawDataStoreRepository rawDataStoreRepository;
 
     private ContentHashingService contentHashingService;
-    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers");
+    private static final Set<String> CONTENT_FIELD_KEYS = Set.of("copy", "disclaimers", "text", "url");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("(?<=/)([a-z]{2})[-_]([A-Z]{2})(?=/|$)");
     private static final String USAGE_REF_DELIM = " ::ref:: ";
     private static final Map<String, String> EVENT_KEYWORDS = Map.of(
@@ -427,17 +427,42 @@ public class DataIngestionService {
                         currentEnvelope.setUsagePath(usagePath);
                         // This is a nested content fragment. Use the outer envelope's field name (fieldKey).
                         processContentField(fieldValue.get("copy").asText(), fieldKey, currentEnvelope, currentFacets, results);
-                    }else if ((fieldValue.isArray())){
+                    } else if (fieldValue.isObject() && fieldValue.has("text") && fieldValue.get("text").isTextual()) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(fieldValue.get("text").asText(), fieldKey, currentEnvelope, currentFacets, results);
+                    } else if (fieldValue.isObject() && fieldValue.has("url") && fieldValue.get("url").isTextual()) {
+                        currentEnvelope.setUsagePath(usagePath);
+                        processContentField(fieldValue.get("url").asText(), fieldKey, currentEnvelope, currentFacets, results);
+                    } else if ((fieldValue.isArray())){
                         // e.g., fieldKey == "disclaimers"
                         // element is each object inside disclaimers[]
-                        for (JsonNode element : fieldValue) {
-                            if (element.isObject()  && element.has("items") && element.get("items").isArray()) {
-                                for (JsonNode item : element.get("items")) {
-                                    if (item.isObject() && item.has("copy") && item.get("copy").isTextual()) {
-                                        currentEnvelope.setUsagePath(usagePath);
-                                        processContentField(item.get("copy").asText(), "disclaimer", currentEnvelope, currentFacets, results);
+                        if ("disclaimers".equals(fieldKey)) {
+                            int groupIndex = 0;
+                            for (JsonNode element : fieldValue) {
+                                if (element.isObject()  && element.has("items") && element.get("items").isArray()) {
+                                    int itemIndex = 0;
+                                    for (JsonNode item : element.get("items")) {
+                                        if (item.isObject() && item.has("copy") && item.get("copy").isTextual()) {
+                                            currentEnvelope.setUsagePath(usagePath);
+                                            String uniqueFieldName = "disclaimer[" + groupIndex + "][" + itemIndex + "]";
+                                            processContentField(item.get("copy").asText(), uniqueFieldName, currentEnvelope, currentFacets, results);
+                                        }
+                                        itemIndex++;
                                     }
                                 }
+                                groupIndex++;
+                            }
+                        } else {
+                            int idx = 0;
+                            for (JsonNode element : fieldValue) {
+                                if (element.isTextual()) {
+                                    currentEnvelope.setUsagePath(usagePath);
+                                    processContentField(element.asText(), fieldKey + "[" + idx + "]", currentEnvelope, currentFacets, results);
+                                } else if (element.isObject() && element.has("copy") && element.get("copy").isTextual()) {
+                                    currentEnvelope.setUsagePath(usagePath);
+                                    processContentField(element.get("copy").asText(), fieldKey + "[" + idx + "]", currentEnvelope, currentFacets, results);
+                                }
+                                idx++;
                             }
                         }
                     }
@@ -446,17 +471,19 @@ public class DataIngestionService {
                         findAndExtractRecursive(fieldValue, fieldKey, currentEnvelope, currentFacets, results);
                     }
                 } else if (fieldKey.toLowerCase().contains("analytics")) {
-                    String analyticsValue = null;
                     if (fieldValue.isArray()) {
-                      //  analyticsValue = fieldValue.get("value").asText();
+                        int analyticsIndex = 0;
                         for (JsonNode element : fieldValue) {
                             if (element.isObject()) {
                                 String name = element.path("name").asText(null);
                                 String value = element.path("value").asText(null);
-                                processContentField(value, fieldKey, currentEnvelope, currentFacets, results);
+                                if (value != null && !value.isBlank()) {
+                                    String uniqueFieldName = (name != null && !name.isBlank()) ? ("analytics[" + name + "]") : ("analytics[" + analyticsIndex + "]");
+                                    processContentField(value, uniqueFieldName, currentEnvelope, currentFacets, results);
+                                }
                             }
+                            analyticsIndex++;
                         }
-
                     } else {
                         logger.warn("Analytics attribute for key '{}' is not in a recognized format (e.g., a string or an object with a 'value' key). Skipping.", fieldKey);
                     }
