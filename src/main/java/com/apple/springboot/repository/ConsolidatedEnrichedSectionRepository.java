@@ -13,7 +13,8 @@ import java.util.UUID;
 @Repository
 public interface ConsolidatedEnrichedSectionRepository extends JpaRepository<ConsolidatedEnrichedSection, UUID>, ConsolidatedEnrichedSectionRepositoryCustom {
     boolean existsBySectionUriAndSectionPathAndCleansedTextAndVersion(String sectionUri, String sectionPath, String cleansedText, Integer version);
-    //boolean existsBySectionUriAndSectionPathAndCleansedText(String sectionUri, String sectionPath, String cleansedText);
+    // For Option B upsert by fragment identity
+    Optional<ConsolidatedEnrichedSection> findBySectionUriAndSectionPathAndOriginalFieldName(String sectionUri, String sectionPath, String originalFieldName);
     Optional<ConsolidatedEnrichedSection> findBySectionPathAndOriginalFieldName(String sectionPath, String originalFieldName);
 
     Optional<ConsolidatedEnrichedSection> findBySourceUriAndVersionAndSectionPath(String sourceUri, Integer version, String sectionPath);

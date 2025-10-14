@@ -52,40 +52,56 @@ public class ConsolidatedSectionService {
             if (sectionPath == null) sectionPath = item.getItemSourcePath();
             if (sectionUri  == null) sectionUri  = item.getItemSourcePath();
 
-            // Prevent duplicate saves by checking using the derived sectionUri/sectionPath
-            boolean exists = consolidatedRepo.existsBySectionUriAndSectionPathAndCleansedTextAndVersion(
-                    sectionUri, sectionPath, item.getCleansedText(), cleansedData.getVersion());
-
-            if (!exists) {
-                ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
-                section.setCleansedDataId(cleansedData.getId());
-                section.setVersion(cleansedData.getVersion());
-                section.setSourceUri(item.getSourceUri());           // file/source that produced this
-                section.setSectionPath(sectionPath);                 // container
-                section.setSectionUri(sectionUri);                  // fragment
-                section.setOriginalFieldName(item.getItemOriginalFieldName());
-                section.setCleansedText(item.getCleansedText());
-                contentHashRepository.findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
-                        .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
-                // Note: contentHash would need to be copied from the 'item' if it existed on that entity.
-                // section.setContentHash(item.getContentHash());
-                section.setSummary(item.getSummary());
-                section.setClassification(item.getClassification());
-                section.setKeywords(item.getKeywords());
-                section.setTags(item.getTags());
-                section.setSentiment(item.getSentiment());
-                section.setModelUsed(item.getBedrockModelUsed());
-                section.setEnrichmentMetadata(item.getEnrichmentMetadata());
-                section.setEnrichedAt(item.getEnrichedAt());
-                section.setContext(item.getContext());
-                section.setSavedAt(OffsetDateTime.now());
-                section.setStatus(item.getStatus());
-
-                consolidatedRepo.save(section);
-                logger.info("Saved new ConsolidatedEnrichedSection ID {} from EnrichedContentElement ID {}", section.getId(), item.getId());
-            } else {
-                logger.info("ConsolidatedEnrichedSection already exists for itemSourcePath '{}' and cleansedText snippet. Skipping save.", item.getItemSourcePath());
-            }
+            // Option B: Upsert by fragment identity (sectionUri, sectionPath, originalFieldName)
+            consolidatedRepo.findBySectionUriAndSectionPathAndOriginalFieldName(sectionUri, sectionPath, item.getItemOriginalFieldName())
+                    .ifPresentOrElse(existing -> {
+                        // Update existing fragment's text and metadata
+                        existing.setCleansedDataId(cleansedData.getId());
+                        existing.setVersion(cleansedData.getVersion());
+                        existing.setSourceUri(item.getSourceUri());
+                        existing.setCleansedText(item.getCleansedText());
+                        contentHashRepository
+                                .findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                                .ifPresent(contentHash -> existing.setContentHash(contentHash.getContentHash()));
+                        existing.setSummary(item.getSummary());
+                        existing.setClassification(item.getClassification());
+                        existing.setKeywords(item.getKeywords());
+                        existing.setTags(item.getTags());
+                        existing.setSentiment(item.getSentiment());
+                        existing.setModelUsed(item.getBedrockModelUsed());
+                        existing.setEnrichmentMetadata(item.getEnrichmentMetadata());
+                        existing.setEnrichedAt(item.getEnrichedAt());
+                        existing.setContext(item.getContext());
+                        existing.setSavedAt(OffsetDateTime.now());
+                        existing.setStatus(item.getStatus());
+                        consolidatedRepo.save(existing);
+                        logger.info("Updated existing ConsolidatedEnrichedSection ID {} for fragment [{} | {} | {}]", existing.getId(), sectionPath, sectionUri, item.getItemOriginalFieldName());
+                    }, () -> {
+                        ConsolidatedEnrichedSection section = new ConsolidatedEnrichedSection();
+                        section.setCleansedDataId(cleansedData.getId());
+                        section.setVersion(cleansedData.getVersion());
+                        section.setSourceUri(item.getSourceUri());
+                        section.setSectionPath(sectionPath);
+                        section.setSectionUri(sectionUri);
+                        section.setOriginalFieldName(item.getItemOriginalFieldName());
+                        section.setCleansedText(item.getCleansedText());
+                        contentHashRepository
+                                .findBySourcePathAndItemType(item.getItemSourcePath(), item.getItemOriginalFieldName())
+                                .ifPresent(contentHash -> section.setContentHash(contentHash.getContentHash()));
+                        section.setSummary(item.getSummary());
+                        section.setClassification(item.getClassification());
+                        section.setKeywords(item.getKeywords());
+                        section.setTags(item.getTags());
+                        section.setSentiment(item.getSentiment());
+                        section.setModelUsed(item.getBedrockModelUsed());
+                        section.setEnrichmentMetadata(item.getEnrichmentMetadata());
+                        section.setEnrichedAt(item.getEnrichedAt());
+                        section.setContext(item.getContext());
+                        section.setSavedAt(OffsetDateTime.now());
+                        section.setStatus(item.getStatus());
+                        consolidatedRepo.save(section);
+                        logger.info("Inserted new ConsolidatedEnrichedSection ID {} for fragment [{} | {} | {}]", section.getId(), sectionPath, sectionUri, item.getItemOriginalFieldName());
+                    });
         }
     }
 

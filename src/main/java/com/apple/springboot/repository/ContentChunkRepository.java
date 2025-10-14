@@ -8,4 +8,5 @@ import java.util.UUID;
 
 @Repository
 public interface ContentChunkRepository extends JpaRepository<ContentChunk, UUID>, ContentChunkRepositoryCustom {
+    void deleteAllByConsolidatedEnrichedSectionId(UUID consolidatedEnrichedSectionId);
 }

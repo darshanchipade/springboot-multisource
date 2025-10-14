@@ -157,6 +157,13 @@ public class EnrichmentProcessor {
 
         List<ConsolidatedEnrichedSection> savedSections = consolidatedSectionService.getSectionsFor(cleansedDataEntry);
         for (ConsolidatedEnrichedSection section : savedSections) {
+            // Option B: replace chunks for this section on every update
+            try {
+                contentChunkRepository.deleteAllByConsolidatedEnrichedSectionId(section.getId());
+            } catch (Exception e) {
+                logger.warn("Failed to delete existing chunks for section {}. Continuing with re-chunk.", section.getId(), e);
+            }
+
             List<String> chunks = textChunkingService.chunkIfNeeded(section.getCleansedText());
             for (String chunkText : chunks) {
                 float[] vector = null;
