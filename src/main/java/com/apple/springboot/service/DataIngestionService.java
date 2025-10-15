@@ -691,24 +691,26 @@ public class DataIngestionService {
         }
 
         if (node.isObject()) {
+            // Rebuild envelope from the analytics object so _model (e.g., "analytics") is captured
+            Envelope analyticsEnvelope = buildCurrentEnvelope(node, env);
             // Direct value
             JsonNode valueNode = node.get("value");
             if (valueNode != null && !valueNode.isNull()) {
-                processContentField(valueNode.asText(), fieldKey, env, facets, results, counters, true);
+                processContentField(valueNode.asText(), fieldKey, analyticsEnvelope, facets, results, counters, true);
             }
             // Nested arrays commonly named 'items' or 'children' or 'child'
             for (String childArrayKey : List.of("items", "children", "child")) {
                 JsonNode childArray = node.get(childArrayKey);
                 if (childArray != null && childArray.isArray()) {
                     for (JsonNode child : childArray) {
-                        processAnalyticsNode(child, fieldKey, env, facets, results, counters);
+                        processAnalyticsNode(child, fieldKey, analyticsEnvelope, facets, results, counters);
                     }
                 }
             }
             // Recurse into other fields to find nested 'value'
             node.fields().forEachRemaining(e -> {
                 if (!List.of("items", "children", "child", "value").contains(e.getKey())) {
-                    processAnalyticsNode(e.getValue(), fieldKey, env, facets, results, counters);
+                    processAnalyticsNode(e.getValue(), fieldKey, analyticsEnvelope, facets, results, counters);
                 }
             });
             return;
