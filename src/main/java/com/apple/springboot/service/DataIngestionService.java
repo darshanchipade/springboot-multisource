@@ -592,9 +592,6 @@ public class DataIngestionService {
         }
 
         if (keep) {
-            //Facets itemFacets = new Facets();
-            facets.putAll(facets);
-            //itemFacets.put("originalCopy", content);
             facets.put("cleansedCopy", cleansedContent);
 
             String lowerCaseContent = cleansedContent.toLowerCase();
@@ -615,7 +612,12 @@ public class DataIngestionService {
             item.put("contentHash", calculateContentHash(cleansedContent, null));
             try {
                 item.put("context", objectMapper.convertValue(finalContext, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
-                item.put("contextHash", calculateContentHash(objectMapper.writeValueAsString(finalContext), null));
+                // Ensure stable property and map ordering when hashing
+                com.fasterxml.jackson.databind.ObjectMapper stableMapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+                        .configure(com.fasterxml.jackson.databind.MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
+                String stableContextJson = stableMapper.writeValueAsString(finalContext);
+                item.put("contextHash", calculateContentHash(stableContextJson, null));
             } catch (JsonProcessingException e) {
                 logger.error("Failed to process context for hashing", e);
             }
