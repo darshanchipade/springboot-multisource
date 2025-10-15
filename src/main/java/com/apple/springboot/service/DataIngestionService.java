@@ -70,19 +70,7 @@ public class DataIngestionService {
     @Value("${app.ingestion.debug-counters:true}")
     private boolean debugCountersEnabled;
 
-    // Include textual value from URL-like objects (object.text or object.url)
-    @Value("${app.ingestion.include-url-text:false}")
-    private boolean includeUrlText;
-
-    // Optional filters to gate URL-text extraction
-    @Value("${app.ingestion.url-text-include-models:}")
-    private String urlTextIncludeModelsCsv;
-
-    @Value("${app.ingestion.url-text-include-path-regex:}")
-    private String urlTextIncludePathRegex;
-
-    @Value("${app.ingestion.url-text-exclude-path-regex:}")
-    private String urlTextExcludePathRegex;
+    // URL gating removed: url.copy and url.text are always extracted when present
 
     // Copy cleansing patterns
     private static final Pattern NBSP_PATTERN = Pattern.compile("\\{%nbsp%\\}");
@@ -691,39 +679,7 @@ public class DataIngestionService {
         return type != null && type.toLowerCase().contains("analytics");
     }
 
-    private boolean allowUrlExtraction(String fieldKey, JsonNode fieldValue, Envelope env) {
-        if (!includeUrlText) return false;
-
-        // If allowlist models provided, require model match
-        if (urlTextIncludeModelsCsv != null && !urlTextIncludeModelsCsv.isBlank()) {
-            Set<String> allowedModels = new HashSet<>();
-            for (String m : urlTextIncludeModelsCsv.split(",")) {
-                if (!m.isBlank()) allowedModels.add(m.trim());
-            }
-            String model = fieldValue.path("_model").asText(env.getModel());
-            if (!allowedModels.isEmpty() && (model == null || !allowedModels.contains(model))) {
-                return false;
-            }
-        }
-
-        // Path regex includes/excludes against current envelope sourcePath
-        String path = env.getSourcePath();
-        if (path == null) return true; // no path context; allow if flag set
-
-        if (urlTextExcludePathRegex != null && !urlTextExcludePathRegex.isBlank()) {
-            try {
-                if (Pattern.compile(urlTextExcludePathRegex).matcher(path).find()) return false;
-            } catch (Exception ignored) { }
-        }
-        if (urlTextIncludePathRegex != null && !urlTextIncludePathRegex.isBlank()) {
-            try {
-                return Pattern.compile(urlTextIncludePathRegex).matcher(path).find();
-            } catch (Exception ignored) {
-                return true; // if regex invalid, fall back to allow
-            }
-        }
-        return true;
-    }
+    // URL gating removed; url.copy and url.text are always extracted
 
     private void processAnalyticsNode(JsonNode node, String fieldKey, Envelope env, Facets facets,
                                       List<Map<String, Object>> results, IngestionCounters counters) {
