@@ -115,7 +115,13 @@ public class EnrichmentProcessor {
 
     private void checkCompletion(CleansedDataStore cleansedDataEntry) {
         long expectedNonBlank = 0L;
-        if (cleansedDataEntry.getCleansedItems() != null) {
+        try {
+            Object ctxExpected = cleansedDataEntry.getContext() == null ? null : cleansedDataEntry.getContext().get("expectedEnrichmentCount");
+            if (ctxExpected instanceof Number n) {
+                expectedNonBlank = n.longValue();
+            }
+        } catch (Exception ignore) { }
+        if (expectedNonBlank == 0 && cleansedDataEntry.getCleansedItems() != null) {
             expectedNonBlank = cleansedDataEntry.getCleansedItems().stream()
                     .map(m -> (String) m.get("cleansedContent"))
                     .filter(s -> s != null && !s.trim().isEmpty())
