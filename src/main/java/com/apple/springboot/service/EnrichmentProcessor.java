@@ -114,12 +114,26 @@ public class EnrichmentProcessor {
     }
 
     private void checkCompletion(CleansedDataStore cleansedDataEntry) {
-        long totalItems = cleansedDataEntry.getCleansedItems().size();
+        long expectedNonBlank = 0L;
+        try {
+            Object ctxExpected = cleansedDataEntry.getContext() == null ? null : cleansedDataEntry.getContext().get("expectedEnrichmentCount");
+            if (ctxExpected instanceof Number n) {
+                expectedNonBlank = n.longValue();
+            }
+        } catch (Exception ignore) { }
+        if (expectedNonBlank == 0 && cleansedDataEntry.getCleansedItems() != null) {
+            expectedNonBlank = cleansedDataEntry.getCleansedItems().stream()
+                    .map(m -> (String) m.get("cleansedContent"))
+                    .filter(s -> s != null && !s.trim().isEmpty())
+                    .count();
+        }
+
         long processedCount = enrichedContentElementRepository.countByCleansedDataId(cleansedDataEntry.getId());
 
-        logger.trace("Completion check for {}: {}/{} items processed.", cleansedDataEntry.getId(), processedCount, totalItems);
+        logger.trace("Completion check for {}: processed={} expected={}",
+                cleansedDataEntry.getId(), processedCount, expectedNonBlank);
 
-        if (processedCount >= totalItems) {
+        if (processedCount >= expectedNonBlank) {
             logger.info("All items for CleansedDataStore ID {} have been processed. Running finalization steps.", cleansedDataEntry.getId());
             runFinalizationSteps(cleansedDataEntry);
         }

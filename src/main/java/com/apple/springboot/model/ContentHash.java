@@ -24,6 +24,10 @@ public class ContentHash {
     @Column(name = "item_type", nullable = false, columnDefinition = "TEXT")
     private String itemType;
 
+    @Id
+    @Column(name = "usage_path", nullable = false, columnDefinition = "TEXT")
+    private String usagePath;
+
     @Column(name = "content_hash", nullable = false, columnDefinition = "TEXT")
     private String contentHash;
 
@@ -33,9 +37,10 @@ public class ContentHash {
     public ContentHash() {
     }
 
-    public ContentHash(String sourcePath, String itemType, String contentHash, String contextHash) {
+    public ContentHash(String sourcePath, String itemType, String usagePath, String contentHash, String contextHash) {
         this.sourcePath = sourcePath;
         this.itemType = itemType;
+        this.usagePath = usagePath;
         this.contentHash = contentHash;
         this.contextHash = contextHash;
     }

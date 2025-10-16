@@ -64,6 +64,7 @@ public class EnrichmentPipelineService {
 
         List<CleansedItemDetail> itemsToEnrich = convertMapsToCleansedItemDetails(maps);
 
+        long enqueuedCount = 0L;
         for (CleansedItemDetail itemDetail : itemsToEnrich) {
             if (itemDetail.cleansedContent == null || itemDetail.cleansedContent.trim().isEmpty()) {
                 logger.warn("Skipping enrichment for item in CleansedDataStore ID: {} (path: {}) due to empty cleansed text.", cleansedDataStoreId, itemDetail.sourcePath);
@@ -71,7 +72,16 @@ public class EnrichmentPipelineService {
             }
             EnrichmentMessage message = new EnrichmentMessage(itemDetail, cleansedDataStoreId);
             sqsService.sendMessage(message);
+            enqueuedCount++;
         }
+
+        // Persist expected (non-blank) count for robust completion checks
+        try {
+            java.util.Map<String, Object> ctx = cleansedDataEntry.getContext();
+            if (ctx == null) ctx = new java.util.HashMap<>();
+            ctx.put("expectedEnrichmentCount", enqueuedCount);
+            cleansedDataEntry.setContext(ctx);
+        } catch (Exception ignore) { }
 
         cleansedDataEntry.setStatus("ENRICHMENT_QUEUED");
         cleansedDataStoreRepository.save(cleansedDataEntry);
